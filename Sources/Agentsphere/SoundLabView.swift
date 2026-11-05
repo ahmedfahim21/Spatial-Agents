@@ -196,6 +196,10 @@ struct LabPanel: View {
             GroupBox("Head") {
                 VStack(alignment: .leading, spacing: 6) {
                     Toggle("Follow AirPods head tracking", isOn: $lab.followHead)
+                    Toggle("Use macOS head tracking (lower latency)", isOn: $lab.systemHeadTracking)
+                        .disabled(!lab.systemHeadTrackingAvailable)
+                    Text("Check the direction: put a sound in front and turn right. It should slide to your LEFT ear. If it goes right, tick Invert direction in the main window.")
+                        .font(.caption).foregroundStyle(.secondary)
                     HStack {
                         Text("Facing \(Int(lab.headYaw))°").monospacedDigit()
                         Spacer()
@@ -212,6 +216,9 @@ struct LabPanel: View {
                         ForEach(LabAlgorithm.allCases) { Text($0.rawValue).tag($0) }
                     }
                     LabSlider(label: "Master", value: $lab.masterVolume, range: 0...1, format: "%.2f")
+                    LabSlider(label: "Back dark", value: $lab.backDarkening, range: 0...24, format: "%.0f dB")
+                    Text("Front vs back is the hardest cue: the built-in HRTF only makes sounds behind you ~5 dB duller. Back darkening adds more, and turning your head a little resolves the rest.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
 

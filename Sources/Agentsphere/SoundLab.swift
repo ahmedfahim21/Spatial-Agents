@@ -46,7 +46,7 @@ struct LabSource: Identifiable {
 
 enum LabAlgorithm: String, CaseIterable, Identifiable {
     case hrtfHQ = "HRTF HQ"
-    case hrtf = "HRTF"
+    case hrtf = "HRTF (lopsided)"
     case sphericalHead = "Spherical head"
     case equalPower = "Equal-power pan"
     case soundField = "Sound field"
@@ -108,6 +108,10 @@ final class SoundLab: ObservableObject {
     @Published var headYaw: Double = 0
 
     @Published var followHead = true { didSet { updatePositions() } }
+    /// macOS 15+: let the system rotate the listener with the AirPods (lower latency than our own tracking).
+    @Published var systemHeadTracking = false { didSet { applyHeadTrackingMode() } }
+    /// Extra treble cut (dB) for sounds behind your head. HRTFs alone give only ~5 dB, too subtle for most people.
+    @Published var backDarkening: Double = 10 { didSet { updatePositions() } }
     @Published var algorithm: LabAlgorithm = .hrtfHQ { didSet { applyPlayerSettings() } }
     @Published var distanceModel: LabDistanceModel = .inverse { didSet { applyEnvironment() } }
     @Published var referenceDistance: Double = 1 { didSet { applyEnvironment() } }
@@ -122,6 +126,9 @@ final class SoundLab: ObservableObject {
     private let environment = AVAudioEnvironmentNode()
     private let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1)!
     private var players: [AVAudioPlayerNode] = []
+    /// player → eq (back darkening) → spatial mixer → environment. 3D settings live on the mixer.
+    private var eqs: [AVAudioUnitEQ] = []
+    private var spatials: [AVAudioMixerNode] = []
     private var buffers: [LabSound: AVAudioPCMBuffer] = [:]
     private var orbitTimer: Timer?
     private var lastOrbitTick = Date()
@@ -137,10 +144,19 @@ final class SoundLab: ObservableObject {
         // source never has to stop the engine.
         for _ in 0..<Self.maxSources {
             let p = AVAudioPlayerNode()
-            engine.attach(p)
-            engine.connect(p, to: environment, format: format)
-            p.sourceMode = .spatializeIfMono
-            players.append(p)
+            let eq = AVAudioUnitEQ(numberOfBands: 1)
+            let band = eq.bands[0]
+            band.filterType = .highShelf
+            band.frequency = 3000
+            band.gain = 0
+            band.bypass = false
+            let m = AVAudioMixerNode()
+            engine.attach(p); engine.attach(eq); engine.attach(m)
+            engine.connect(p, to: eq, format: format)
+            engine.connect(eq, to: m, format: format)
+            engine.connect(m, to: environment, format: format)
+            m.sourceMode = .spatializeIfMono
+            players.append(p); eqs.append(eq); spatials.append(m)
         }
         for s in [LabSound.beep, .clicks, .noise, .chime] { buffers[s] = makeBuffer(s) }
         makeVoiceBuffer()
@@ -236,16 +252,35 @@ final class SoundLab: ObservableObject {
 
     private func applyPosition(_ s: LabSource) {
         // Rotate the world opposite the head so sources stay fixed in the room.
-        let yaw = followHead ? headYaw : 0
+        // With system head tracking, macOS rotates the listener instead, so we don't.
+        let yaw = followHead && !systemHeadTracking ? headYaw : 0
         let rel = (s.azimuth - yaw) * .pi / 180
         let d = s.groundDistance
         // Listener faces -Z; +X is right; +Y is up.
-        players[s.slot].position = AVAudio3DPoint(x: Float(sin(rel) * d), y: Float(s.height), z: Float(-cos(rel) * d))
+        let m = spatials[s.slot]
+        m.position = AVAudio3DPoint(x: Float(sin(rel) * d), y: Float(s.height), z: Float(-cos(rel) * d))
+
+        // Back darkening: 0 at the sides and in front, full directly behind your head.
+        let headRel = (s.azimuth - (followHead || systemHeadTracking ? headYaw : 0)) * .pi / 180
+        let behind = max(0, -cos(headRel))
+        eqs[s.slot].bands[0].gain = Float(-backDarkening * behind)
+        m.volume = Float(s.gain * pow(10, -backDarkening * 0.15 * behind / 20))
+    }
+
+    private func applyHeadTrackingMode() {
+        if #available(macOS 15.0, *) {
+            environment.isListenerHeadTrackingEnabled = systemHeadTracking
+        }
+        updatePositions()
+    }
+
+    var systemHeadTrackingAvailable: Bool {
+        if #available(macOS 15.0, *) { return true }
+        return false
     }
 
     private func applySource(_ s: LabSource) {
-        let p = players[s.slot]
-        p.volume = Float(s.gain)
+        let p = spatials[s.slot]
         p.reverbBlend = Float(s.reverbBlend)
         p.obstruction = Float(s.obstruction)
         p.occlusion = Float(s.occlusion)
@@ -278,7 +313,7 @@ final class SoundLab: ObservableObject {
     }
 
     private func applyPlayerSettings() {
-        for p in players { p.renderingAlgorithm = algorithm.value }
+        for m in spatials { m.renderingAlgorithm = algorithm.value }
     }
 
     /// Loudness the distance model should give at `distance`, in dB (0 = reference loudness).
