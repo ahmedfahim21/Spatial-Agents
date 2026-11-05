@@ -62,21 +62,23 @@ final class ShellEnvironment {
 
 /// Runs one turn of a Claude Code session headlessly and returns its reply.
 enum ClaudeRunner {
-    static func run(prompt: String, in dir: URL, resume: String?, extraArgs: String) async -> ClaudeResult {
+    static func run(prompt: String, in dir: URL, resume: String?, extraArgs: String, agentId: UUID) async -> ClaudeResult {
         await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
-                cont.resume(returning: runSync(prompt: prompt, in: dir, resume: resume, extraArgs: extraArgs))
+                cont.resume(returning: runSync(prompt: prompt, in: dir, resume: resume, extraArgs: extraArgs, agentId: agentId))
             }
         }
     }
 
-    private static func runSync(prompt: String, in dir: URL, resume: String?, extraArgs: String) -> ClaudeResult {
+    private static func runSync(prompt: String, in dir: URL, resume: String?, extraArgs: String, agentId: UUID) -> ClaudeResult {
         guard let claude = ShellEnvironment.shared.claudeExecutable() else {
             return ClaudeResult(text: "I couldn't find the claude command. Install Claude Code first.", sessionId: nil, isError: true)
         }
 
         var args = ["-p", prompt, "--output-format", "json"]
         if let resume { args += ["--resume", resume] }
+        // Every tool call goes through the PreToolUse hook, which asks Agentsphere.
+        args += ["--settings", HookInstaller.settingsPath]
         args += extraArgs.split(separator: " ").map(String.init)
 
         let p = Process()
@@ -85,6 +87,7 @@ enum ClaudeRunner {
         p.currentDirectoryURL = dir
         var env = ProcessInfo.processInfo.environment
         if let path = ShellEnvironment.shared.path { env["PATH"] = path }
+        env["AGENTSPHERE_AGENT"] = agentId.uuidString
         p.environment = env
 
         let out = Pipe()

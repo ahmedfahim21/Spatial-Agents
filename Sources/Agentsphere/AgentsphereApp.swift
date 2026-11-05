@@ -137,6 +137,7 @@ struct AgentDot: View {
         switch session.status {
         case .idle: return .gray
         case .working: return .orange
+        case .asking: return .purple
         case .waiting: return .green
         case .error: return .red
         }
@@ -149,7 +150,7 @@ struct AgentDot: View {
                     Circle().stroke(Color.accentColor, lineWidth: 3).frame(width: 50, height: 50)
                 }
                 Circle().fill(color).frame(width: 38, height: 38)
-                Image(systemName: session.status == .working ? "ellipsis" : "terminal")
+                Image(systemName: session.status == .asking ? "hand.raised.fill" : session.status == .working ? "ellipsis" : "terminal")
                     .foregroundStyle(.white)
             }
             Text(session.name).font(.caption.bold()).lineLimit(1)
@@ -186,10 +187,44 @@ struct ControlPanel: View {
                         Toggle("Invert direction", isOn: $state.invertHead)
                     }
                     HStack {
+                        Text("Pitch \(Int(state.headPitch))°").monospacedDigit()
+                        Spacer()
+                        Text("Last gesture: \(state.lastGesture)").bold()
+                    }
+                    HStack {
+                        Text("Gesture sensitivity")
+                        Slider(value: $state.gestureSensitivity, in: 0.5...2)
+                        Text(String(format: "%.1f×", state.gestureSensitivity)).monospacedDigit().frame(width: 44)
+                    }
+                    HStack {
                         Text("Focus width")
                         Slider(value: $state.focusWidth, in: 10...60)
                         Text("±\(Int(state.focusWidth))°").monospacedDigit().frame(width: 44)
                     }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            GroupBox("Approvals (\(state.pending.count) waiting)") {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let r = state.activeRequest {
+                        let name = state.sessions.first { $0.id == r.agentId }?.name ?? "?"
+                        Text("\(name) \(r.summary)").bold()
+                        Text("\(r.toolName) · \(r.hash.prefix(12))").font(.caption.monospaced()).foregroundStyle(.secondary)
+                        HStack {
+                            Button("Approve (nod)") { state.decideActive(true) }
+                                .keyboardShortcut("y", modifiers: .option)
+                                .tint(.green)
+                            Button("Deny (shake)") { state.decideActive(false) }
+                                .keyboardShortcut("n", modifiers: .option)
+                                .tint(.red)
+                            Text("⌥Y / ⌥N").font(.caption).foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    } else {
+                        Text("Nothing waiting. Nod to approve, shake to deny.").foregroundStyle(.secondary)
+                    }
+                    Text(state.serverStatus).font(.caption).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }

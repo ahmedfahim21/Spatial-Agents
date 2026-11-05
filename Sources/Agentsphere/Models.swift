@@ -3,6 +3,7 @@ import Foundation
 enum AgentStatus: String {
     case idle = "Idle"
     case working = "Working…"
+    case asking = "Needs approval"
     case waiting = "Has a reply"
     case error = "Error"
 }
