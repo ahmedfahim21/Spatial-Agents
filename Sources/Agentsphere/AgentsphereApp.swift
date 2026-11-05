@@ -191,7 +191,8 @@ struct ControlPanel: View {
                 Spacer()
                 Button("Sound Lab") { openWindow(id: "lab") }
                     .keyboardShortcut("l", modifiers: .option)
-                Button("Add Claude session…") { state.addSession() }
+                Button("Add Claude session…") { state.showDiscover = true }
+                    .keyboardShortcut("n", modifiers: .command)
             }
 
             GroupBox("Head") {
@@ -326,5 +327,6 @@ struct ControlPanel: View {
             }
         }
         .padding(18)
+        .sheet(isPresented: $state.showDiscover) { DiscoverSheet().environmentObject(state) }
     }
 }

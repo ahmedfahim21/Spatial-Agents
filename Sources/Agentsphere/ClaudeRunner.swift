@@ -62,21 +62,24 @@ final class ShellEnvironment {
 
 /// Runs one turn of a Claude Code session headlessly and returns its reply.
 enum ClaudeRunner {
-    static func run(prompt: String, in dir: URL, resume: String?, extraArgs: String, agentId: UUID) async -> ClaudeResult {
+    static func run(prompt: String, in dir: URL, resume: String?, fork: Bool = false, extraArgs: String, agentId: UUID) async -> ClaudeResult {
         await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
-                cont.resume(returning: runSync(prompt: prompt, in: dir, resume: resume, extraArgs: extraArgs, agentId: agentId))
+                cont.resume(returning: runSync(prompt: prompt, in: dir, resume: resume, fork: fork, extraArgs: extraArgs, agentId: agentId))
             }
         }
     }
 
-    private static func runSync(prompt: String, in dir: URL, resume: String?, extraArgs: String, agentId: UUID) -> ClaudeResult {
+    private static func runSync(prompt: String, in dir: URL, resume: String?, fork: Bool, extraArgs: String, agentId: UUID) -> ClaudeResult {
         guard let claude = ShellEnvironment.shared.claudeExecutable() else {
             return ClaudeResult(text: "I couldn't find the claude command. Install Claude Code first.", sessionId: nil, isError: true)
         }
 
         var args = ["-p", prompt, "--output-format", "json"]
-        if let resume { args += ["--resume", resume] }
+        if let resume {
+            args += ["--resume", resume]
+            if fork { args.append("--fork-session") }
+        }
         // Every tool call goes through the PreToolUse hook, which asks Agentsphere.
         args += ["--settings", HookInstaller.settingsPath]
         args += extraArgs.split(separator: " ").map(String.init)

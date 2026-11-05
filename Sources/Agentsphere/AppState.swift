@@ -19,6 +19,9 @@ final class AppState: ObservableObject {
     @Published var voiceStatus = ""
     @Published var voiceEngine = ""
     @Published var elevenKeyInput = ""
+    @Published var showDiscover = false
+    @Published var discovered: [DiscoveredSession] = []
+    @Published var scanning = false
     @Published var permissionTimeout: Double = 60
     @Published var gestureSensitivity: Double = 1 { didSet { tracker.sensitivity = gestureSensitivity } }
     @Published var focusWidth: Double = 30
@@ -214,12 +217,51 @@ final class AppState: ObservableObject {
         panel.prompt = "Put an agent here"
         panel.message = "Pick the project folder this Claude Code session works in."
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        place(AgentSession(name: url.lastPathComponent, directory: url, azimuth: 0))
+    }
 
-        let azimuth = defaultAzimuths[sessions.count % defaultAzimuths.count]
-        let session = AgentSession(name: url.lastPathComponent, directory: url, azimuth: azimuth)
+    /// Finds Claude Code sessions on this Mac (live first, then recent).
+    func refreshDiscovery() {
+        scanning = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let found = SessionDiscovery.scan()
+            DispatchQueue.main.async {
+                self.discovered = found
+                self.scanning = false
+            }
+        }
+    }
+
+    func isAttached(_ d: DiscoveredSession) -> Bool {
+        sessions.contains { $0.claudeSessionId == d.sessionId }
+    }
+
+    /// Puts a discovered session in the room. `fresh` starts a new conversation in that folder.
+    func attach(_ d: DiscoveredSession, fresh: Bool = false) {
+        var name = d.folderName
+        let taken = Set(sessions.map(\.name))
+        var n = 2
+        while taken.contains(name) { name = "\(d.folderName) \(n)"; n += 1 }
+        var s = AgentSession(name: name, directory: d.directory, azimuth: 0)
+        if !fresh {
+            s.claudeSessionId = d.sessionId
+            s.forkNext = d.isLive
+            s.title = d.title
+        }
+        place(s)
+        appendLog(speaker: "Agentsphere",
+                  text: fresh ? "New session in \(d.directory.path)."
+                      : d.isLive ? "Attached to live session “\(d.title)” — it's open elsewhere, so the first turn forks it."
+                      : "Resuming “\(d.title.isEmpty ? d.sessionId : d.title)”.",
+                  fromUser: false)
+    }
+
+    private func place(_ new: AgentSession) {
+        var session = new
+        session.azimuth = defaultAzimuths[sessions.count % defaultAzimuths.count]
         sessions.append(session)
         selectedId = session.id
-        audio.register(id: session.id, azimuth: azimuth, voiceIndex: sessions.count - 1)
+        audio.register(id: session.id, azimuth: session.azimuth, voiceIndex: sessions.count - 1)
         audio.speak("\(session.name) is here.", from: session.id)
         updateFocus(immediate: true)
     }
@@ -291,17 +333,21 @@ final class AppState: ObservableObject {
         audio.ping(from: id, high: true)
 
         let resume = s.claudeSessionId
+        let fork = s.forkNext
         let dir = s.directory
         let args = extraArgs
         Task {
-            let result = await ClaudeRunner.run(prompt: text, in: dir, resume: resume, extraArgs: args, agentId: id)
+            let result = await ClaudeRunner.run(prompt: text, in: dir, resume: resume, fork: fork, extraArgs: args, agentId: id)
             await MainActor.run { self.finish(id: id, result: result) }
         }
     }
 
     private func finish(id: UUID, result: ClaudeResult) {
         guard let i = index(of: id) else { return }
-        if let sid = result.sessionId { sessions[i].claudeSessionId = sid }
+        if let sid = result.sessionId {
+            sessions[i].claudeSessionId = sid
+            sessions[i].forkNext = false
+        }
         sessions[i].lastReply = result.text
         sessions[i].status = result.isError ? .error : .waiting
         appendLog(speaker: sessions[i].name, text: result.text, fromUser: false)
