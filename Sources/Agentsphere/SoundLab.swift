@@ -45,6 +45,7 @@ struct LabSource: Identifiable {
 }
 
 enum LabAlgorithm: String, CaseIterable, Identifiable {
+    case auto = "Apple Spatial (Auto)"
     case hrtfHQ = "HRTF HQ"
     case hrtf = "HRTF (lopsided)"
     case sphericalHead = "Spherical head"
@@ -53,6 +54,7 @@ enum LabAlgorithm: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var value: AVAudio3DMixingRenderingAlgorithm {
         switch self {
+        case .auto: return .auto
         case .hrtfHQ: return .HRTFHQ
         case .hrtf: return .HRTF
         case .sphericalHead: return .sphericalHead
@@ -117,7 +119,9 @@ final class SoundLab: ObservableObject {
     @Published var echoFalloff: Double = 0.7 { didSet { updatePositions() } }
     /// Treble cut (dB) per doubling of distance beyond the reference distance.
     @Published var airAbsorption: Double = 3 { didSet { updatePositions() } }
-    @Published var algorithm: LabAlgorithm = .hrtfHQ { didSet { applyPlayerSettings() } }
+    /// Auto is Apple's own spatial renderer (the one behind system Spatial Audio); with
+    /// headphones it uses your personalized spatial audio profile if the system has one.
+    @Published var algorithm: LabAlgorithm = .auto { didSet { applyPlayerSettings() } }
     @Published var distanceModel: LabDistanceModel = .inverse { didSet { applyEnvironment() } }
     @Published var referenceDistance: Double = 1 { didSet { applyEnvironment() } }
     @Published var maximumDistance: Double = 200 { didSet { applyEnvironment() } }
@@ -162,7 +166,8 @@ final class SoundLab: ObservableObject {
             engine.connect(p, to: eq, format: format)
             engine.connect(eq, to: m, format: format)
             engine.connect(m, to: environment, format: format)
-            m.sourceMode = .spatializeIfMono
+            m.sourceMode = .pointSource
+            m.pointSourceInHeadMode = .mono
             players.append(p); eqs.append(eq); spatials.append(m)
         }
         for s in [LabSound.beep, .clicks, .noise, .chime] { buffers[s] = makeBuffer(s) }
