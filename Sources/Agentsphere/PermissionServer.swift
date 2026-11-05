@@ -54,9 +54,9 @@ final class PermissionServer {
     func start() {
         do {
             let params = NWParameters.tcp
-            params.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: Self.port)!)
+            params.requiredInterfaceType = .loopback
             params.allowLocalEndpointReuse = true
-            let l = try NWListener(using: params)
+            let l = try NWListener(using: params, on: NWEndpoint.Port(rawValue: Self.port)!)
             l.newConnectionHandler = { [weak self] c in self?.accept(c) }
             l.stateUpdateHandler = { [weak self] s in
                 let msg: String?
