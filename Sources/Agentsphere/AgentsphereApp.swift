@@ -17,6 +17,13 @@ struct AgentsphereApp: App {
                 .frame(minWidth: 960, minHeight: 620)
         }
         .windowResizability(.contentMinSize)
+
+        Window("Sound Lab", id: "lab") {
+            SoundLabView()
+                .environmentObject(state)
+                .environmentObject(state.lab)
+        }
+        .windowResizability(.contentMinSize)
     }
 }
 
@@ -175,12 +182,15 @@ struct AgentDot: View {
 
 struct ControlPanel: View {
     @EnvironmentObject var state: AppState
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text("Agentsphere").font(.title2.bold())
                 Spacer()
+                Button("Sound Lab") { openWindow(id: "lab") }
+                    .keyboardShortcut("l", modifiers: .option)
                 Button("Add Claude session…") { state.addSession() }
             }
 

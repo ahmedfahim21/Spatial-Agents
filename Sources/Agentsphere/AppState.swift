@@ -25,6 +25,7 @@ final class AppState: ObservableObject {
     let tracker = HeadTracker()
     let speech = SpeechInput()
     let server = PermissionServer()
+    let lab = SoundLab()
 
     /// Tools that can't change anything: allowed without asking so you aren't spammed.
     private let readOnlyTools: Set<String> = ["Read", "Grep", "Glob", "LS", "NotebookRead", "TodoWrite", "BashOutput", "Task"]
@@ -64,6 +65,7 @@ final class AppState: ObservableObject {
     private func handleYaw(_ yaw: Double) {
         headYaw = yaw
         audio.headYaw = yaw
+        lab.setHeadYaw(yaw)
         updateFocus()
         if abs(tracker.yawSpeed) < 40 { steadyFocusId = focusedId }
     }
