@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreAudio
 import Foundation
 
 /// What a lab source plays, on loop.
@@ -130,6 +131,7 @@ final class SoundLab: ObservableObject {
     @Published var reverb: LabReverb = .mediumRoom { didSet { applyEnvironment() } }
     @Published var reverbLevel: Double = -6 { didSet { applyEnvironment() } }
     @Published var masterVolume: Double = 0.9 { didSet { environment.outputVolume = Float(masterVolume) } }
+    @Published var engineStatus = "Not started"
 
     private let engine = AVAudioEngine()
     private let environment = AVAudioEnvironmentNode()
@@ -175,14 +177,47 @@ final class SoundLab: ObservableObject {
         applyEnvironment()
         applyPlayerSettings()
         environment.outputVolume = Float(masterVolume)
+        // macOS stops the engine whenever the output changes (AirPods reconnect, Spatial Audio
+        // toggled, mic switching AirPods to call mode). Restart it or the lab goes silent.
+        NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            self?.recover(reason: "Audio output changed")
+        }
+    }
+
+    /// Restarts the engine and every playing source.
+    func recover(reason: String) {
+        guard started else { return }
+        print("Sound Lab: \(reason); restarting engine")
+        startEngine()
+        for s in sources { restart(s) }
+    }
+
+    private func startEngine() {
+        if !engine.isRunning {
+            engine.prepare()
+            do { try engine.start() } catch { print("Sound Lab engine error: \(error)") }
+        }
+        engineStatus = (engine.isRunning ? "Running" : "STOPPED") + " · output: \(Self.outputDeviceName())"
+    }
+
+    static func outputDeviceName() -> String {
+        var id = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+                                              mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &id) == noErr else { return "?" }
+        var name: Unmanaged<CFString>?
+        size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        addr.mSelector = kAudioObjectPropertyName
+        guard AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &name) == noErr, let n = name else { return "?" }
+        return n.takeRetainedValue() as String
     }
 
     /// Starts the engine the first time the lab window opens.
     func activate() {
         guard !started else { return }
         started = true
-        engine.prepare()
-        do { try engine.start() } catch { print("Sound Lab engine error: \(error)") }
+        startEngine()
         orbitTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.tickOrbits() }
         if sources.isEmpty {
             add(.voice, right: -2, forward: 1)
@@ -247,6 +282,7 @@ final class SoundLab: ObservableObject {
         let p = players[s.slot]
         p.stop()
         guard s.playing, started, let buf = buffers[s.sound] else { return }
+        if !engine.isRunning { startEngine() }
         p.scheduleBuffer(buf, at: nil, options: .loops, completionHandler: nil)
         p.play()
     }

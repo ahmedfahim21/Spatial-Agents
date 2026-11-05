@@ -25,6 +25,13 @@ final class SpatialAudio {
         environment.distanceAttenuationParameters.referenceDistance = 1
         environment.reverbParameters.enable = false
         startEngine()
+        // macOS stops the engine when the output device changes; bring the agents' voices back.
+        NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            print("Agentsphere: audio output changed; restarting engine")
+            self.startEngine()
+            for p in self.players.values { p.play() }
+        }
     }
 
     private func startEngine() {

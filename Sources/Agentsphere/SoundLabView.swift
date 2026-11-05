@@ -168,7 +168,12 @@ struct LabPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Sound Lab").font(.title2.bold())
+            HStack {
+                Text("Sound Lab").font(.title2.bold())
+                Spacer()
+                Button("Restart audio") { lab.recover(reason: "Restart button") }
+            }
+            Text(lab.engineStatus).font(.caption).foregroundStyle(lab.engineStatus.hasPrefix("Running") ? Color.secondary : Color.red)
 
             GroupBox("Sources") {
                 VStack(alignment: .leading, spacing: 8) {
