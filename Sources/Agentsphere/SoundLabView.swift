@@ -230,7 +230,9 @@ struct LabPanel: View {
                     LabSlider(label: "Reference", value: $lab.referenceDistance, range: 0.1...20, format: "%.1f m")
                     LabSlider(label: "Maximum", value: $lab.maximumDistance, range: 1...1000, format: "%.0f m")
                     LabSlider(label: "Rolloff", value: $lab.rolloff, range: 0...4, format: "%.2f")
-                    Text("Full loudness inside the reference distance; quieter beyond it. Linear reaches silence at the maximum.")
+                    LabSlider(label: "Echo falloff", value: $lab.echoFalloff, range: 0...1.5, format: "%.2f")
+                    LabSlider(label: "Air absorb", value: $lab.airAbsorption, range: 0...10, format: "%.1f dB")
+                    Text("Full loudness inside the reference distance; quieter beyond it. Echo falloff keeps far sounds from turning into pure echo (which feels like it's on top of you). Air absorption dulls the treble per doubling of distance.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -279,7 +281,7 @@ struct SourceEditor: View {
                 let rel = normalizeAngle(source.azimuth - (lab.followHead ? lab.headYaw : 0))
                 Text("\(SoundLabView.meters(source.distance)) away · \(Int(source.azimuth))° in room · \(Int(rel))° from your nose")
                     .font(.caption).monospacedDigit()
-                Text(String(format: "Distance model: %.1f dB", lab.expectedGainDB(at: source.distance)))
+                Text(String(format: "Distance model: %.1f dB · echo send %.2f", lab.expectedGainDB(at: source.distance), lab.effectiveEcho(source)))
                     .font(.caption).monospacedDigit().foregroundStyle(.secondary)
 
                 LabSlider(label: "Distance", value: Binding(

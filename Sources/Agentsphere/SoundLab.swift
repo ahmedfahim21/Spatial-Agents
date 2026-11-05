@@ -32,7 +32,7 @@ struct LabSource: Identifiable {
     var height: Double = 0
     var gain: Double = 0.8
     var playing = true
-    var reverbBlend: Double = 0.2
+    var reverbBlend: Double = 0.35
     var obstruction: Double = 0
     var occlusion: Double = 0
     /// Degrees per second around you; 0 = stays put.
@@ -112,6 +112,11 @@ final class SoundLab: ObservableObject {
     @Published var systemHeadTracking = false { didSet { applyHeadTrackingMode() } }
     /// Extra treble cut (dB) for sounds behind your head. HRTFs alone give only ~5 dB, too subtle for most people.
     @Published var backDarkening: Double = 10 { didSet { updatePositions() } }
+    /// The engine sends the same echo level at every distance, so far sources become almost
+    /// pure echo and lose their direction. 0 = engine default, 1 = echo falls 10 dB per decade.
+    @Published var echoFalloff: Double = 0.7 { didSet { updatePositions() } }
+    /// Treble cut (dB) per doubling of distance beyond the reference distance.
+    @Published var airAbsorption: Double = 3 { didSet { updatePositions() } }
     @Published var algorithm: LabAlgorithm = .hrtfHQ { didSet { applyPlayerSettings() } }
     @Published var distanceModel: LabDistanceModel = .inverse { didSet { applyEnvironment() } }
     @Published var referenceDistance: Double = 1 { didSet { applyEnvironment() } }
@@ -144,12 +149,14 @@ final class SoundLab: ObservableObject {
         // source never has to stop the engine.
         for _ in 0..<Self.maxSources {
             let p = AVAudioPlayerNode()
-            let eq = AVAudioUnitEQ(numberOfBands: 1)
-            let band = eq.bands[0]
-            band.filterType = .highShelf
-            band.frequency = 3000
-            band.gain = 0
-            band.bypass = false
+            // Band 0: back darkening. Band 1: air absorption.
+            let eq = AVAudioUnitEQ(numberOfBands: 2)
+            for (band, hz) in zip(eq.bands, [3000.0, 5000.0]) {
+                band.filterType = .highShelf
+                band.frequency = Float(hz)
+                band.gain = 0
+                band.bypass = false
+            }
             let m = AVAudioMixerNode()
             engine.attach(p); engine.attach(eq); engine.attach(m)
             engine.connect(p, to: eq, format: format)
@@ -265,6 +272,18 @@ final class SoundLab: ObservableObject {
         let behind = max(0, -cos(headRel))
         eqs[s.slot].bands[0].gain = Float(-backDarkening * behind)
         m.volume = Float(s.gain * pow(10, -backDarkening * 0.15 * behind / 20))
+
+        // Distance cues the engine doesn't give on its own.
+        let far = max(s.distance, referenceDistance) / referenceDistance
+        eqs[s.slot].bands[1].gain = Float(max(-30, -airAbsorption * log2(far)))
+        m.reverbBlend = Float(effectiveEcho(s))
+    }
+
+    /// Echo send after distance falloff. Send power tracks the blend, so blend ∝ d^-falloff
+    /// makes the echo drop 10·falloff dB per decade while the direct sound drops 20 dB.
+    func effectiveEcho(_ s: LabSource) -> Double {
+        let far = max(s.distance, referenceDistance) / referenceDistance
+        return min(1, s.reverbBlend * pow(far, -echoFalloff))
     }
 
     private func applyHeadTrackingMode() {
@@ -281,7 +300,6 @@ final class SoundLab: ObservableObject {
 
     private func applySource(_ s: LabSource) {
         let p = spatials[s.slot]
-        p.reverbBlend = Float(s.reverbBlend)
         p.obstruction = Float(s.obstruction)
         p.occlusion = Float(s.occlusion)
         applyPosition(s)
@@ -306,6 +324,7 @@ final class SoundLab: ObservableObject {
         d.referenceDistance = Float(referenceDistance)
         d.maximumDistance = Float(max(maximumDistance, referenceDistance + 0.1))
         d.rolloffFactor = Float(rolloff)
+        updatePositions()
         let r = environment.reverbParameters
         r.enable = reverbOn
         r.loadFactoryReverbPreset(reverb.value)
