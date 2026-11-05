@@ -60,6 +60,8 @@ struct RadarView: View {
                     .fill(Color.accentColor.opacity(0.14))
                     .frame(width: r * 2, height: r * 2)
                     .position(center)
+                    // AirPods report ~25 times a second; glide between updates.
+                    .animation(.linear(duration: 0.045), value: state.headYaw)
 
                 Image(systemName: "person.crop.circle")
                     .font(.system(size: 34))
@@ -111,6 +113,11 @@ struct RadarView: View {
 struct FocusCone: Shape {
     var yaw: Double
     var width: Double
+
+    var animatableData: AnimatablePair<Double, Double> {
+        get { AnimatablePair(yaw, width) }
+        set { yaw = newValue.first; width = newValue.second }
+    }
 
     func path(in rect: CGRect) -> Path {
         var p = Path()
@@ -184,6 +191,7 @@ struct ControlPanel: View {
                         .monospacedDigit()
                     HStack {
                         Button("Recenter") { state.recenter() }
+                            .keyboardShortcut("r", modifiers: .option)
                         Toggle("Invert direction", isOn: $state.invertHead)
                     }
                     HStack {

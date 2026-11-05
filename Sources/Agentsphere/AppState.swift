@@ -55,20 +55,43 @@ final class AppState: ObservableObject {
 
     // MARK: - Head
 
+    /// Focus as it was while the head was steady. Gestures answer this agent, so a
+    /// shake that swings past a neighbour still answers the one you were facing.
+    private var steadyFocusId: UUID?
+    private var candidateId: UUID?
+    private var candidateSince = Date.distantPast
+
     private func handleYaw(_ yaw: Double) {
         headYaw = yaw
         audio.headYaw = yaw
         updateFocus()
+        if abs(tracker.yawSpeed) < 40 { steadyFocusId = focusedId }
     }
 
-    func updateFocus() {
+    /// Picks the agent you're facing, with stickiness so focus doesn't flicker at the edges:
+    /// keep the current agent until you're clearly past it, and only switch after a short dwell.
+    func updateFocus(immediate: Bool = false) {
+        let margin = 8.0
+        func diff(_ s: AgentSession) -> Double { abs(normalizeAngle(s.azimuth - headYaw)) }
+
         var best: (id: UUID, diff: Double)?
         for s in sessions {
-            let diff = abs(normalizeAngle(s.azimuth - headYaw))
-            if diff <= focusWidth, diff < (best?.diff ?? .infinity) { best = (s.id, diff) }
+            let d = diff(s)
+            if d <= focusWidth, d < (best?.diff ?? .infinity) { best = (s.id, d) }
         }
-        let newId = best?.id
-        guard newId != focusedId else { return }
+        var newId = best?.id
+        if let cur = sessions.first(where: { $0.id == focusedId }), diff(cur) <= focusWidth + margin {
+            // Stay on the current agent unless another is clearly closer.
+            if let b = best, b.id != cur.id, b.diff + margin < diff(cur) { newId = b.id } else { newId = cur.id }
+        }
+
+        guard newId != focusedId else { candidateId = nil; return }
+        if !immediate {
+            if candidateId != newId { candidateId = newId; candidateSince = Date(); return }
+            // Fast sweeps through an agent shouldn't select it.
+            if Date().timeIntervalSince(candidateSince) < 0.15 || abs(tracker.yawSpeed) > 150 { return }
+        }
+        candidateId = nil
         focusedId = newId
         if let newId { audio.ping(from: newId, high: false) }
     }
@@ -82,7 +105,8 @@ final class AppState: ObservableObject {
 
     /// The request a nod or shake answers: the one from the agent you're facing, else the oldest.
     var activeRequest: PermissionRequest? {
-        pending.first { $0.agentId != nil && $0.agentId == focusedId } ?? pending.first
+        let id = steadyFocusId ?? focusedId
+        return pending.first { $0.agentId != nil && $0.agentId == id } ?? pending.first
     }
 
     private func handlePermission(_ r: PermissionRequest) {
@@ -173,7 +197,7 @@ final class AppState: ObservableObject {
         selectedId = session.id
         audio.register(id: session.id, azimuth: azimuth, voiceIndex: sessions.count - 1)
         audio.speak("\(session.name) is here.", from: session.id)
-        updateFocus()
+        updateFocus(immediate: true)
     }
 
     func removeSession(_ id: UUID) {
@@ -182,14 +206,14 @@ final class AppState: ObservableObject {
         sessions.removeAll { $0.id == id }
         if selectedId == id { selectedId = sessions.first?.id }
         if focusedId == id { focusedId = nil }
-        updateFocus()
+        updateFocus(immediate: true)
     }
 
     func setAzimuth(_ id: UUID, _ azimuth: Double) {
         guard let i = index(of: id) else { return }
         sessions[i].azimuth = normalizeAngle(azimuth)
         audio.setAzimuth(id: id, azimuth: sessions[i].azimuth)
-        updateFocus()
+        updateFocus(immediate: true)
     }
 
     // MARK: - Talking
