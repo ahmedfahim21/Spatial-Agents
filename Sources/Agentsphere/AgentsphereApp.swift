@@ -286,6 +286,20 @@ struct ControlPanel: View {
                 }
             }
 
+            GroupBox("Voice: \(state.voiceEngine)") {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        SecureField(state.audio.voices.elevenLabs.hasStoredKey ? "ElevenLabs key saved (paste to replace)" : "ElevenLabs API key", text: $state.elevenKeyInput)
+                            .onSubmit { state.saveElevenLabsKey() }
+                        Button("Save") { state.saveElevenLabsKey() }
+                        Button("Test") { state.testVoice() }
+                    }
+                    Text(state.voiceStatus.isEmpty ? "ElevenLabs → local Kokoro → Apple, whichever works first." : state.voiceStatus)
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             GroupBox("Claude flags") {
                 TextField("Extra arguments", text: $state.extraArgs)
                     .font(.system(.body, design: .monospaced))

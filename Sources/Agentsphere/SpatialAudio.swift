@@ -11,8 +11,10 @@ final class SpatialAudio {
 
     private var players: [UUID: AVAudioPlayerNode] = [:]
     private var azimuths: [UUID: Double] = [:]
-    private var synths: [UUID: AVSpeechSynthesizer] = [:]
-    private var voices: [UUID: AVSpeechSynthesisVoice] = [:]
+    private var voiceIndex: [UUID: Int] = [:]
+    /// Each agent speaks one line at a time; a new line waits for the previous one.
+    private var speechTail: [UUID: Task<Void, Never>] = [:]
+    let voices = VoiceRouter()
 
     var headYaw: Double = 0 { didSet { updatePositions() } }
 
@@ -52,8 +54,7 @@ final class SpatialAudio {
         player.sourceMode = .spatializeIfMono
         players[id] = player
         azimuths[id] = azimuth
-        synths[id] = AVSpeechSynthesizer()
-        voices[id] = Self.pickVoice(index: voiceIndex)
+        self.voiceIndex[id] = voiceIndex
         startEngine()
         for p in players.values { p.play() }
         updatePositions()
@@ -65,8 +66,9 @@ final class SpatialAudio {
         engine.detach(player)
         players[id] = nil
         azimuths[id] = nil
-        synths[id] = nil
-        voices[id] = nil
+        voiceIndex[id] = nil
+        speechTail[id]?.cancel()
+        speechTail[id] = nil
     }
 
     func setAzimuth(id: UUID, azimuth: Double) {
@@ -89,23 +91,34 @@ final class SpatialAudio {
     // MARK: - Sound
 
     /// Speaks text from the agent's position in the room.
+    /// Speaks text from the agent's position. The voice engine (ElevenLabs, Kokoro or Apple)
+    /// streams chunks; each is resampled and scheduled on the agent's spatial player.
     func speak(_ text: String, from id: UUID) {
-        guard let player = players[id], let synth = synths[id] else { return }
+        guard let player = players[id], let index = voiceIndex[id] else { return }
         startEngine()
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = voices[id]
-        let box = ConverterBox()
+        let previous = speechTail[id]
         let target = format
-        synth.write(utterance) { [weak self] buffer in
-            guard let self,
-                  let pcm = buffer as? AVAudioPCMBuffer,
-                  pcm.frameLength > 0 else { return }
-            if box.converter == nil || box.converter?.inputFormat != pcm.format {
-                box.converter = AVAudioConverter(from: pcm.format, to: target)
+        speechTail[id] = Task { [weak self] in
+            await previous?.value
+            guard let self, !Task.isCancelled else { return }
+            let box = ConverterBox()
+            var last: AVAudioPCMBuffer?
+            await self.voices.speak(text, voiceIndex: index) { pcm in
+                guard pcm.frameLength > 0 else { return }
+                if box.converter == nil || box.converter?.inputFormat != pcm.format {
+                    box.converter = AVAudioConverter(from: pcm.format, to: target)
+                }
+                guard let conv = box.converter, let out = self.convert(pcm, with: conv) else { return }
+                player.scheduleBuffer(out, completionHandler: nil)
+                if !player.isPlaying { player.play() }
+                last = out
             }
-            guard let conv = box.converter, let out = self.convert(pcm, with: conv) else { return }
-            player.scheduleBuffer(out, completionHandler: nil)
-            if !player.isPlaying { player.play() }
+            // Hold the queue until this line finishes playing.
+            if let last {
+                await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                    player.scheduleBuffer(AVAudioPCMBuffer(pcmFormat: last.format, frameCapacity: 1)!, completionCallbackType: .dataPlayedBack) { _ in c.resume() }
+                }
+            }
         }
     }
 
@@ -150,13 +163,6 @@ final class SpatialAudio {
         return out
     }
 
-    private static func pickVoice(index: Int) -> AVSpeechSynthesisVoice? {
-        let english = AVSpeechSynthesisVoice.speechVoices()
-            .filter { $0.language.hasPrefix("en") }
-            .sorted { $0.quality.rawValue > $1.quality.rawValue }
-        guard !english.isEmpty else { return nil }
-        return english[index % english.count]
-    }
 }
 
 private final class ConverterBox { var converter: AVAudioConverter? }

@@ -16,6 +16,9 @@ final class AppState: ObservableObject {
     @Published var lastGesture = "—"
     @Published var pending: [PermissionRequest] = []
     @Published var serverStatus = "Starting permission server…"
+    @Published var voiceStatus = ""
+    @Published var voiceEngine = ""
+    @Published var elevenKeyInput = ""
     @Published var permissionTimeout: Double = 60
     @Published var gestureSensitivity: Double = 1 { didSet { tracker.sensitivity = gestureSensitivity } }
     @Published var focusWidth: Double = 30
@@ -40,6 +43,8 @@ final class AppState: ObservableObject {
         speech.onPartial = { [weak self] t in self?.transcript = t }
         server.onRequest = { [weak self] r in self?.handlePermission(r) }
         server.onStatus = { [weak self] s in self?.serverStatus = s }
+        audio.voices.onStatus = { [weak self] s in self?.voiceStatus = s }
+        voiceEngine = audio.voices.activeLabel
         HookInstaller.install()
         server.start()
         ShellEnvironment.shared.resolve()
@@ -101,6 +106,23 @@ final class AppState: ObservableObject {
     func recenter() {
         tracker.recenter()
         appendLog(speaker: "Agentsphere", text: "Recentered: where you're looking is now the front.", fromUser: false)
+    }
+
+    // MARK: - Voice
+
+    func saveElevenLabsKey() {
+        audio.voices.elevenLabs.setKey(elevenKeyInput)
+        elevenKeyInput = ""
+        voiceEngine = audio.voices.activeLabel
+        voiceStatus = audio.voices.elevenLabs.hasStoredKey ? "Key saved in Keychain" : "Key removed"
+    }
+
+    func testVoice() {
+        guard let t = target ?? sessions.first(where: { $0.id == selectedId }) ?? sessions.first else {
+            voiceStatus = "Add an agent first, then test its voice."
+            return
+        }
+        audio.speak("Hi, I'm \(t.name). I'll ask here when I need your permission.", from: t.id)
     }
 
     // MARK: - Permissions
