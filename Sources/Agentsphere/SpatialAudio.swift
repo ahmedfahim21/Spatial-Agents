@@ -3,7 +3,7 @@ import Foundation
 
 /// Places each agent's voice at a fixed point in the room. Sources are moved
 /// opposite to your head, so when you turn toward an agent it ends up in front of you.
-final class SpatialAudio {
+final class SpatialAudio: AgentAudio {
     private let engine = AVAudioEngine()
     private let environment = AVAudioEnvironmentNode()
     private let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1)!
@@ -14,11 +14,12 @@ final class SpatialAudio {
     private var voiceIndex: [UUID: Int] = [:]
     /// Each agent speaks one line at a time; a new line waits for the previous one.
     private var speechTail: [UUID: Task<Void, Never>] = [:]
-    let voices = VoiceRouter()
+    let voices: VoiceRouter
 
     var headYaw: Double = 0 { didSet { updatePositions() } }
 
-    init() {
+    init(voices: VoiceRouter) {
+        self.voices = voices
         engine.attach(environment)
         engine.connect(environment, to: engine.mainMixerNode, format: nil)
         environment.listenerPosition = AVAudio3DPoint(x: 0, y: 0, z: 0)

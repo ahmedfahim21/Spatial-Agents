@@ -1,0 +1,310 @@
+import AVFoundation
+import Foundation
+import PHASE
+import simd
+
+/// What the app needs from a spatial audio backend for the agents.
+/// Two implementations: `SpatialAudio` (AVAudioEngine) and `PhaseAgentAudio` (PHASE).
+protocol AgentAudio: AnyObject {
+    var headYaw: Double { get set }
+    var voices: VoiceRouter { get }
+    func register(id: UUID, azimuth: Double, voiceIndex: Int)
+    func remove(id: UUID)
+    func setAzimuth(id: UUID, azimuth: Double)
+    func speak(_ text: String, from id: UUID)
+    func ping(from id: UUID, high: Bool)
+}
+
+enum AudioBackendKind: String, CaseIterable, Identifiable {
+    case avAudioEngine = "AVAudioEngine"
+    case phase = "PHASE"
+    var id: String { rawValue }
+}
+
+// MARK: - Shared PHASE scene
+
+/// One PHASE engine with a listener and a spatial mixer whose direct path, early reflections
+/// and late reverb sends can be changed live through meta parameters.
+final class PhaseScene {
+    let engine = PHASEEngine(updateMode: .automatic)
+    let listener: PHASEListener
+    let mixer: PHASESpatialMixerDefinition
+    let directSend = PHASENumberMetaParameterDefinition(value: 1, minimum: 0, maximum: 1)
+    let earlySend = PHASENumberMetaParameterDefinition(value: 0.5, minimum: 0, maximum: 1)
+    let lateSend = PHASENumberMetaParameterDefinition(value: 0.2, minimum: 0, maximum: 1)
+    private(set) var startError: String?
+
+    init(reverb: PHASEReverbPreset = .mediumRoom) {
+        engine.outputSpatializationMode = .alwaysUseBinaural
+        engine.defaultReverbPreset = reverb
+        engine.unitsPerMeter = 1
+
+        listener = PHASEListener(engine: engine)
+        listener.transform = matrix_identity_float4x4
+        try? engine.rootObject.addChild(listener)
+
+        let pipeline = PHASESpatialPipeline(flags: [.directPathTransmission, .earlyReflections, .lateReverb])!
+        pipeline.entries[.directPathTransmission]?.sendLevelMetaParameterDefinition = directSend
+        pipeline.entries[.earlyReflections]?.sendLevelMetaParameterDefinition = earlySend
+        pipeline.entries[.lateReverb]?.sendLevelMetaParameterDefinition = lateSend
+        mixer = PHASESpatialMixerDefinition(spatialPipeline: pipeline)
+        let distance = PHASEGeometricSpreadingDistanceModelParameters()
+        distance.rolloffFactor = 1
+        distance.fadeOutParameters = PHASEDistanceModelFadeOutParameters(cullDistance: 2000)
+        mixer.distanceModelParameters = distance
+
+        do { try engine.start() } catch {
+            startError = error.localizedDescription
+            print("PHASE engine error: \(error)")
+        }
+    }
+
+    deinit { engine.stop() }
+
+    /// macOS 15+: let the system rotate the listener with the AirPods.
+    func setSystemHeadTracking(_ on: Bool) {
+        if #available(macOS 15.0, *) { listener.automaticHeadTrackingFlags = on ? [.orientation] : [] }
+    }
+
+    func makeSource() -> PHASESource {
+        let s = PHASESource(engine: engine)
+        try? engine.rootObject.addChild(s)
+        return s
+    }
+
+    func mixerParameters(for source: PHASESource) -> PHASEMixerParameters {
+        let p = PHASEMixerParameters()
+        p.addSpatialMixerParameters(identifier: mixer.identifier, source: source, listener: listener)
+        return p
+    }
+
+    /// Metres: right (+ = right), forward (+ = in front), up (+ = up).
+    func place(_ obj: PHASEObject, right: Double, forward: Double, up: Double) {
+        let p = PHASEObject.right * Float(right) + PHASEObject.forward * Float(forward) + PHASEObject.up * Float(up)
+        var m = matrix_identity_float4x4
+        m.columns.3 = SIMD4<Float>(p.x, p.y, p.z, 1)
+        obj.transform = m
+    }
+
+    func applySends(to event: PHASESoundEvent, direct: Double, early: Double, late: Double) {
+        event.metaParameters[directSend.identifier]?.value = NSNumber(value: direct)
+        event.metaParameters[earlySend.identifier]?.value = NSNumber(value: early)
+        event.metaParameters[lateSend.identifier]?.value = NSNumber(value: late)
+    }
+}
+
+// MARK: - Agents on PHASE
+
+/// Agents' voices through PHASE: each agent is a point source fed by a push stream,
+/// with PHASE's early reflections and room reverb for a sense of space.
+final class PhaseAgentAudio: AgentAudio {
+    let voices: VoiceRouter
+    private let scene = PhaseScene(reverb: .mediumRoom)
+    private let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1)!
+    private let radius = 1.5
+
+    private struct Agent {
+        let source: PHASESource
+        let event: PHASESoundEvent
+        let stream: PHASEPushStreamNode
+        let assetId: String
+        var azimuth: Double
+        let voiceIndex: Int
+    }
+    private var agents: [UUID: Agent] = [:]
+    private var speechTail: [UUID: Task<Void, Never>] = [:]
+
+    var headYaw: Double = 0 { didSet { updatePositions() } }
+
+    init(voices: VoiceRouter) {
+        self.voices = voices
+    }
+
+    func register(id: UUID, azimuth: Double, voiceIndex: Int) {
+        guard agents[id] == nil else { return }
+        let source = scene.makeSource()
+        let streamDef = PHASEPushStreamNodeDefinition(mixerDefinition: scene.mixer, format: format)
+        streamDef.normalize = true
+        let assetId = "agent-\(id.uuidString)"
+        do {
+            _ = try scene.engine.assetRegistry.registerSoundEventAsset(rootNode: streamDef, identifier: assetId)
+            let event = try PHASESoundEvent(engine: scene.engine, assetIdentifier: assetId,
+                                            mixerParameters: scene.mixerParameters(for: source))
+            guard let stream = event.pushStreamNodes[streamDef.identifier] else {
+                throw VoiceError(message: "PHASE push stream missing")
+            }
+            scene.applySends(to: event, direct: 1, early: 0.5, late: 0.2)
+            event.start(completion: nil)
+            agents[id] = Agent(source: source, event: event, stream: stream, assetId: assetId, azimuth: azimuth, voiceIndex: voiceIndex)
+        } catch {
+            print("PHASE register failed: \(error)")
+            scene.engine.rootObject.removeChild(source)
+        }
+        updatePositions()
+    }
+
+    func remove(id: UUID) {
+        guard let a = agents.removeValue(forKey: id) else { return }
+        speechTail[id]?.cancel()
+        speechTail[id] = nil
+        a.event.stopAndInvalidate()
+        scene.engine.assetRegistry.unregisterAsset(identifier: a.assetId, completion: nil)
+        scene.engine.rootObject.removeChild(a.source)
+    }
+
+    func setAzimuth(id: UUID, azimuth: Double) {
+        agents[id]?.azimuth = azimuth
+        updatePositions()
+    }
+
+    private func updatePositions() {
+        for a in agents.values {
+            let rel = (a.azimuth - headYaw) * .pi / 180
+            scene.place(a.source, right: sin(rel) * radius, forward: cos(rel) * radius, up: 0)
+        }
+    }
+
+    func speak(_ text: String, from id: UUID) {
+        guard let a = agents[id] else { return }
+        let previous = speechTail[id]
+        let target = format
+        let stream = a.stream
+        speechTail[id] = Task { [weak self] in
+            await previous?.value
+            guard let self, !Task.isCancelled else { return }
+            var converter: AVAudioConverter?
+            var scheduled = false
+            await self.voices.speak(text, voiceIndex: a.voiceIndex) { pcm in
+                guard pcm.frameLength > 0 else { return }
+                if converter == nil || converter?.inputFormat != pcm.format {
+                    converter = AVAudioConverter(from: pcm.format, to: target)
+                }
+                guard let conv = converter, let out = AudioConvert.convert(pcm, with: conv, to: target) else { return }
+                stream.scheduleBuffer(buffer: out)
+                scheduled = true
+            }
+            // Hold the queue until this line has been rendered.
+            if scheduled, let marker = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: 1) {
+                marker.frameLength = 1
+                await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                    stream.scheduleBuffer(buffer: marker, completionCallbackType: .dataRendered) { _ in c.resume() }
+                }
+            }
+        }
+    }
+
+    func ping(from id: UUID, high: Bool) {
+        guard let a = agents[id], let tone = AudioConvert.tone(frequency: high ? 990 : 660, format: format) else { return }
+        a.stream.scheduleBuffer(buffer: tone)
+    }
+}
+
+// MARK: - Sound Lab on PHASE
+
+/// Plays Sound Lab sources through PHASE so they can be compared with AVAudioEngine.
+/// Pure PHASE: none of the lab's own tricks (back darkening, air absorption, echo falloff).
+final class PhaseLabBackend {
+    private let scene = PhaseScene(reverb: .mediumRoom)
+    private let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1)!
+    private var registered: Set<LabSound> = []
+    private var sources: [Int: PHASESource] = [:]
+    private var events: [Int: PHASESoundEvent] = [:]
+
+    var direct = 1.0, early = 0.5, late = 0.2
+
+    var startError: String? { scene.startError }
+
+    func setReverb(_ preset: PHASEReverbPreset) { scene.engine.defaultReverbPreset = preset }
+    func setSystemHeadTracking(_ on: Bool) { scene.setSystemHeadTracking(on) }
+
+    /// Registers a looping event for a lab sound (once per sound type).
+    private func ensureAsset(_ sound: LabSound, buffer: AVAudioPCMBuffer) -> Bool {
+        if registered.contains(sound) { return true }
+        guard let ch = buffer.floatChannelData?[0] else { return false }
+        let data = Data(bytes: ch, count: Int(buffer.frameLength) * MemoryLayout<Float>.size)
+        let soundId = "lab-sound-\(sound.rawValue)"
+        let eventId = "lab-event-\(sound.rawValue)"
+        do {
+            _ = try scene.engine.assetRegistry.registerSoundAsset(data: data, identifier: soundId, format: format, normalizationMode: .dynamic)
+            let sampler = PHASESamplerNodeDefinition(soundAssetIdentifier: soundId, mixerDefinition: scene.mixer)
+            sampler.playbackMode = .looping
+            sampler.cullOption = .sleepWakeAtRealtimeOffset
+            _ = try scene.engine.assetRegistry.registerSoundEventAsset(rootNode: sampler, identifier: eventId)
+            registered.insert(sound)
+            return true
+        } catch {
+            print("PHASE lab asset failed: \(error)")
+            return false
+        }
+    }
+
+    func play(slot: Int, sound: LabSound, buffer: AVAudioPCMBuffer) {
+        stop(slot: slot)
+        guard ensureAsset(sound, buffer: buffer) else { return }
+        let source = sources[slot] ?? scene.makeSource()
+        sources[slot] = source
+        do {
+            let event = try PHASESoundEvent(engine: scene.engine, assetIdentifier: "lab-event-\(sound.rawValue)",
+                                            mixerParameters: scene.mixerParameters(for: source))
+            scene.applySends(to: event, direct: direct, early: early, late: late)
+            event.start(completion: nil)
+            events[slot] = event
+        } catch {
+            print("PHASE lab event failed: \(error)")
+        }
+    }
+
+    func stop(slot: Int) {
+        events.removeValue(forKey: slot)?.stopAndInvalidate()
+    }
+
+    func stopAll() {
+        for slot in Array(events.keys) { stop(slot: slot) }
+    }
+
+    func place(slot: Int, right: Double, forward: Double, up: Double, gain: Double) {
+        let s = sources[slot] ?? scene.makeSource()
+        sources[slot] = s
+        s.gain = gain
+        scene.place(s, right: right, forward: forward, up: up)
+    }
+
+    func applySends() {
+        for e in events.values { scene.applySends(to: e, direct: direct, early: early, late: late) }
+    }
+}
+
+// MARK: - Shared audio helpers
+
+enum AudioConvert {
+    /// Converts one buffer with a long-lived converter (keeps resampler state across chunks).
+    static func convert(_ input: AVAudioPCMBuffer, with conv: AVAudioConverter, to format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        let ratio = format.sampleRate / input.format.sampleRate
+        let capacity = AVAudioFrameCount(Double(input.frameLength) * ratio + 1024)
+        guard let out = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { return nil }
+        var fed = false
+        var error: NSError?
+        let status = conv.convert(to: out, error: &error) { _, outStatus in
+            if fed { outStatus.pointee = .noDataNow; return nil }
+            fed = true
+            outStatus.pointee = .haveData
+            return input
+        }
+        if status == .error || out.frameLength == 0 { return nil }
+        return out
+    }
+
+    static func tone(frequency: Double, duration: Double = 0.12, format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        let sr = format.sampleRate
+        let frames = AVAudioFrameCount(sr * duration)
+        guard let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames),
+              let data = buf.floatChannelData?[0] else { return nil }
+        buf.frameLength = frames
+        for i in 0..<Int(frames) {
+            let t = Double(i) / sr
+            let envelope = min(1, t / 0.01) * min(1, (duration - t) / 0.04)
+            data[i] = Float(sin(2 * .pi * frequency * t) * 0.25 * max(0, envelope))
+        }
+        return buf
+    }
+}

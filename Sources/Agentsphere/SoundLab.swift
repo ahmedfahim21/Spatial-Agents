@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreAudio
 import Foundation
+import PHASE
 
 /// What a lab source plays, on loop.
 enum LabSound: String, CaseIterable, Identifiable {
@@ -61,6 +62,28 @@ enum LabAlgorithm: String, CaseIterable, Identifiable {
         case .sphericalHead: return .sphericalHead
         case .equalPower: return .equalPowerPanning
         case .soundField: return .soundField
+        }
+    }
+}
+
+enum LabPhaseRoom: String, CaseIterable, Identifiable {
+    case none = "None"
+    case smallRoom = "Small room"
+    case mediumRoom = "Medium room"
+    case largeRoom = "Large room"
+    case mediumChamber = "Medium chamber"
+    case largeHall = "Large hall"
+    case cathedral = "Cathedral"
+    var id: String { rawValue }
+    var value: PHASEReverbPreset {
+        switch self {
+        case .none: return .none
+        case .smallRoom: return .smallRoom
+        case .mediumRoom: return .mediumRoom
+        case .largeRoom: return .largeRoom
+        case .mediumChamber: return .mediumChamber
+        case .largeHall: return .largeHall
+        case .cathedral: return .cathedral
         }
     }
 }
@@ -132,6 +155,14 @@ final class SoundLab: ObservableObject {
     @Published var reverbLevel: Double = -6 { didSet { applyEnvironment() } }
     @Published var masterVolume: Double = 0.9 { didSet { environment.outputVolume = Float(masterVolume) } }
     @Published var engineStatus = "Not started"
+
+    /// Play the lab through PHASE instead of AVAudioEngine (pure Apple, no lab tricks).
+    @Published var usePhase = false { didSet { if usePhase != oldValue { switchEngine() } } }
+    @Published var phaseDirect: Double = 1 { didSet { syncPhaseSends() } }
+    @Published var phaseEarly: Double = 0.5 { didSet { syncPhaseSends() } }
+    @Published var phaseLate: Double = 0.2 { didSet { syncPhaseSends() } }
+    @Published var phaseRoom: LabPhaseRoom = .mediumRoom { didSet { phase?.setReverb(phaseRoom.value) } }
+    private var phase: PhaseLabBackend?
 
     private let engine = AVAudioEngine()
     private let environment = AVAudioEnvironmentNode()
@@ -229,6 +260,7 @@ final class SoundLab: ObservableObject {
     /// Silences everything (lab window closed).
     func deactivate() {
         for p in players { p.stop() }
+        phase?.stopAll()
         for i in sources.indices { sources[i].playing = false }
     }
 
@@ -250,6 +282,7 @@ final class SoundLab: ObservableObject {
     func remove(_ id: UUID) {
         guard let s = sources.first(where: { $0.id == id }) else { return }
         players[s.slot].stop()
+        phase?.stop(slot: s.slot)
         sources.removeAll { $0.id == id }
         if selectedId == id { selectedId = sources.first?.id }
     }
@@ -281,6 +314,13 @@ final class SoundLab: ObservableObject {
     private func restart(_ s: LabSource) {
         let p = players[s.slot]
         p.stop()
+        if usePhase, let phase {
+            phase.stop(slot: s.slot)
+            guard s.playing, started, let buf = buffers[s.sound] else { return }
+            applyPosition(s)
+            phase.play(slot: s.slot, sound: s.sound, buffer: buf)
+            return
+        }
         guard s.playing, started, let buf = buffers[s.sound] else { return }
         if !engine.isRunning { startEngine() }
         p.scheduleBuffer(buf, at: nil, options: .loops, completionHandler: nil)
@@ -304,6 +344,10 @@ final class SoundLab: ObservableObject {
         let yaw = followHead && !systemHeadTracking ? headYaw : 0
         let rel = (s.azimuth - yaw) * .pi / 180
         let d = s.groundDistance
+        if usePhase, let phase {
+            phase.place(slot: s.slot, right: sin(rel) * d, forward: cos(rel) * d, up: s.height, gain: s.gain)
+            return
+        }
         // Listener faces -Z; +X is right; +Y is up.
         let m = spatials[s.slot]
         m.position = AVAudio3DPoint(x: Float(sin(rel) * d), y: Float(s.height), z: Float(-cos(rel) * d))
@@ -331,6 +375,7 @@ final class SoundLab: ObservableObject {
         if #available(macOS 15.0, *) {
             environment.isListenerHeadTrackingEnabled = systemHeadTracking
         }
+        phase?.setSystemHeadTracking(systemHeadTracking)
         updatePositions()
     }
 
@@ -355,6 +400,32 @@ final class SoundLab: ObservableObject {
             let d = s.groundDistance
             update(s.id) { $0.right = sin(a) * d; $0.forward = cos(a) * d }
         }
+    }
+
+    // MARK: - PHASE
+
+    private func switchEngine() {
+        if usePhase {
+            if phase == nil {
+                let p = PhaseLabBackend()
+                p.direct = phaseDirect; p.early = phaseEarly; p.late = phaseLate
+                p.setReverb(phaseRoom.value)
+                phase = p
+            }
+            phase?.setSystemHeadTracking(systemHeadTracking)
+            for p in players { p.stop() }
+            engineStatus = phase?.startError.map { "PHASE failed: \($0)" } ?? "PHASE running"
+        } else {
+            phase?.stopAll()
+            startEngine()
+        }
+        for s in sources { restart(s) }
+    }
+
+    private func syncPhaseSends() {
+        guard let phase else { return }
+        phase.direct = phaseDirect; phase.early = phaseEarly; phase.late = phaseLate
+        phase.applySends()
     }
 
     // MARK: - Room

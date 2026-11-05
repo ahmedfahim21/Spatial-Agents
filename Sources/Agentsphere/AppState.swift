@@ -27,7 +27,9 @@ final class AppState: ObservableObject {
     @Published var focusWidth: Double = 30
     @Published var invertHead = false { didSet { tracker.invert = invertHead } }
 
-    let audio = SpatialAudio()
+    let voices = VoiceRouter()
+    private(set) var audio: AgentAudio
+    @Published var audioBackend: AudioBackendKind = .avAudioEngine { didSet { if audioBackend != oldValue { rebuildAudio() } } }
     let tracker = HeadTracker()
     let speech = SpeechInput()
     let server = PermissionServer()
@@ -39,6 +41,7 @@ final class AppState: ObservableObject {
     private let defaultAzimuths: [Double] = [-60, 60, 180, -120, 120, 0]
 
     init() {
+        audio = SpatialAudio(voices: voices)
         tracker.onYaw = { [weak self] yaw in self?.handleYaw(yaw) }
         tracker.onStatus = { [weak self] s in DispatchQueue.main.async { self?.headStatus = s } }
         tracker.onPitch = { [weak self] p in self?.headPitch = p }
@@ -46,8 +49,8 @@ final class AppState: ObservableObject {
         speech.onPartial = { [weak self] t in self?.transcript = t }
         server.onRequest = { [weak self] r in self?.handlePermission(r) }
         server.onStatus = { [weak self] s in self?.serverStatus = s }
-        audio.voices.onStatus = { [weak self] s in self?.voiceStatus = s }
-        voiceEngine = audio.voices.activeLabel
+        voices.onStatus = { [weak self] s in self?.voiceStatus = s }
+        voiceEngine = voices.activeLabel
         HookInstaller.install()
         server.start()
         ShellEnvironment.shared.resolve()
@@ -114,10 +117,20 @@ final class AppState: ObservableObject {
     // MARK: - Voice
 
     func saveElevenLabsKey() {
-        audio.voices.elevenLabs.setKey(elevenKeyInput)
+        voices.elevenLabs.setKey(elevenKeyInput)
         elevenKeyInput = ""
-        voiceEngine = audio.voices.activeLabel
-        voiceStatus = audio.voices.elevenLabs.hasStoredKey ? "Key saved in Keychain" : "Key removed"
+        voiceEngine = voices.activeLabel
+        voiceStatus = voices.elevenLabs.hasStoredKey ? "Key saved in Keychain" : "Key removed"
+    }
+
+    /// Swaps the agents' spatial backend (AVAudioEngine ↔ PHASE) and puts everyone back.
+    private func rebuildAudio() {
+        for s in sessions { audio.remove(id: s.id) }
+        audio = audioBackend == .phase ? PhaseAgentAudio(voices: voices) : SpatialAudio(voices: voices)
+        for (i, s) in sessions.enumerated() { audio.register(id: s.id, azimuth: s.azimuth, voiceIndex: i) }
+        audio.headYaw = headYaw
+        appendLog(speaker: "Agentsphere", text: "Spatial engine: \(audioBackend.rawValue).", fromUser: false)
+        if let t = target { audio.speak("Now using \(audioBackend == .phase ? "phase" : "the audio engine").", from: t.id) }
     }
 
     func testVoice() {

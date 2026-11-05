@@ -290,11 +290,15 @@ struct ControlPanel: View {
             GroupBox("Voice: \(state.voiceEngine)") {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        SecureField(state.audio.voices.elevenLabs.hasStoredKey ? "ElevenLabs key saved (paste to replace)" : "ElevenLabs API key", text: $state.elevenKeyInput)
+                        SecureField(state.voices.elevenLabs.hasStoredKey ? "ElevenLabs key saved (paste to replace)" : "ElevenLabs API key", text: $state.elevenKeyInput)
                             .onSubmit { state.saveElevenLabsKey() }
                         Button("Save") { state.saveElevenLabsKey() }
                         Button("Test") { state.testVoice() }
                     }
+                    Picker("Spatial engine", selection: $state.audioBackend) {
+                        ForEach(AudioBackendKind.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
                     Text(state.voiceStatus.isEmpty ? "ElevenLabs → local Kokoro → Apple, whichever works first." : state.voiceStatus)
                         .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }

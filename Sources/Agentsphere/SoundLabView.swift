@@ -215,6 +215,28 @@ struct LabPanel: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
 
+            GroupBox("Engine") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Picker("", selection: $lab.usePhase) {
+                        Text("AVAudioEngine").tag(false)
+                        Text("PHASE").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    if lab.usePhase {
+                        Picker("Room", selection: $lab.phaseRoom) {
+                            ForEach(LabPhaseRoom.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        LabSlider(label: "Direct", value: $lab.phaseDirect, range: 0...1, format: "%.2f")
+                        LabSlider(label: "Early refl.", value: $lab.phaseEarly, range: 0...1, format: "%.2f")
+                        LabSlider(label: "Late reverb", value: $lab.phaseLate, range: 0...1, format: "%.2f")
+                        Text("Pure PHASE: early reflections are the bounces that make a sound feel out in the room. The lab's own tricks (back dark, air, echo falloff) and the AVAudioEngine settings below don't apply.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             GroupBox("Rendering") {
                 VStack(alignment: .leading, spacing: 6) {
                     Picker("Algorithm", selection: $lab.algorithm) {
