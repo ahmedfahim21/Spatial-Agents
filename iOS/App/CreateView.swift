@@ -39,6 +39,7 @@ struct CreateView: View {
     @State private var catalog = [CatalogDraft()]
     @State private var template: AgentTemplate?
     @State private var model = ZGModel.defaultId
+    @State private var privateInference = false
     @State private var tools = Set(AgentTool.available)
     /// Where a placed agent goes; nil = wherever you are when you tap Create.
     @State private var place: CLLocationCoordinate2D?
@@ -94,7 +95,8 @@ struct CreateView: View {
                         ForEach(VoicePalette.voices, id: \.id) { Text($0.name).tag($0.id) }
                     }
                     .pickerStyle(.navigationLink)
-                    ModelRow(model: $model)
+                    ModelRow(model: $model, privateOnly: privateInference)
+                    PrivateInferenceRow(isOn: $privateInference, model: $model)
                 }
 
                 Section("Colour and shape") {
@@ -258,6 +260,7 @@ struct CreateView: View {
             radiusM: radius
         )
         if model != ZGModel.defaultId { new.model = model }
+        if privateInference { new.privateInference = true }
         let items = selling ? menu : []
         field = nil
         saving = true

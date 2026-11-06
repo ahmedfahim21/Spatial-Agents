@@ -7,11 +7,15 @@ struct ZGModel: Identifiable, Decodable, Hashable {
     let description: String?
     let type: String?
     let teeAttested: Bool?
+    /// "TeeML" when the model itself runs in an enclave, the only models the private tier serves.
+    let verifiability: String?
 
-    enum CodingKeys: String, CodingKey { case id, name, description, type, teeAttested = "tee_attested" }
+    enum CodingKeys: String, CodingKey { case id, name, description, type, verifiability, teeAttested = "tee_attested" }
 
     /// The server's default (`ZG_MODEL`).
     static let defaultId = "claude-haiku-5.5"
+    /// The server's default for private agents (`ZG_PRIVATE_MODEL`).
+    static let privateDefaultId = "0gm-1.0-35b-a3b"
 
     /// Quick to answer, which matters when the reply is spoken. In this order.
     static let recommended: [(id: String, note: String)] = [
@@ -24,7 +28,14 @@ struct ZGModel: Identifiable, Decodable, Hashable {
         ("qwen3.7-flash", "Fast, multilingual."),
     ]
 
+    /// Quick to answer among the private models. In this order.
+    static let recommendedPrivate: [(id: String, note: String)] = [
+        (privateDefaultId, "0G's own model. The private default."),
+        ("glm-5.3", "Smarter, a little slower."),
+    ]
+
     var displayName: String { name ?? id }
+    var isPrivate: Bool { verifiability == "TeeML" }
 
     /// Grouped by maker in the full list.
     var family: String {
@@ -67,10 +78,11 @@ final class ModelCatalog {
 /// "Model" row for Create and Edit: opens the picker.
 struct ModelRow: View {
     @Binding var model: String
+    var privateOnly = false
 
     var body: some View {
         NavigationLink {
-            ModelPicker(selection: $model)
+            ModelPicker(selection: $model, privateOnly: privateOnly)
         } label: {
             HStack {
                 Text("Model")
@@ -82,17 +94,42 @@ struct ModelRow: View {
     }
 }
 
+/// "Private inference" switch for Create and Edit. Turning it on moves the agent to a private
+/// model, because the private tier can't serve the others.
+struct PrivateInferenceRow: View {
+    @Binding var isOn: Bool
+    @Binding var model: String
+
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Private inference")
+                Text("The model runs sealed in a TEE on 0G, with fewer models to choose from.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .onChange(of: isOn) { _, on in
+            guard on, ModelCatalog.shared.models.first(where: { $0.id == model })?.isPrivate != true else { return }
+            model = ZGModel.privateDefaultId
+        }
+    }
+}
+
 struct ModelPicker: View {
     @Binding var selection: String
+    var privateOnly = false
     @Environment(\.dismiss) private var dismiss
     @State private var search = ""
     private var catalog: ModelCatalog { .shared }
 
     var body: some View {
         List {
-            if catalog.models.isEmpty {
+            if available.isEmpty {
                 Section {
-                    if catalog.failed {
+                    if !catalog.models.isEmpty {
+                        Label("0G has no private models right now.", systemImage: "lock.slash")
+                            .foregroundStyle(.secondary)
+                    } else if catalog.failed {
                         Label("Couldn't load 0G's models. Check your connection.", systemImage: "wifi.exclamationmark")
                             .foregroundStyle(.secondary)
                     } else {
@@ -104,7 +141,9 @@ struct ModelPicker: View {
                 Section {
                     ForEach(recommended, id: \.0.id) { m, note in row(m, note: note) }
                 } header: { Text("Recommended for talking") } footer: {
-                    Text("Every agent thinks through the 0G Compute Router. Models marked TEE run in attested hardware enclaves.")
+                    Text(privateOnly
+                        ? "Private inference shows only models that run sealed in a TEE. Turn it off for the full catalogue."
+                        : "Every agent thinks through the 0G Compute Router. Models marked TEE run in attested hardware enclaves.")
                 }
             }
             ForEach(families, id: \.0) { family, models in
@@ -119,13 +158,16 @@ struct ModelPicker: View {
         .task { await catalog.load() }
     }
 
+    private var available: [ZGModel] { privateOnly ? catalog.models.filter(\.isPrivate) : catalog.models }
+
     private var recommended: [(ZGModel, String)] {
-        ZGModel.recommended.compactMap { r in catalog.models.first { $0.id == r.id }.map { ($0, r.note) } }
+        (privateOnly ? ZGModel.recommendedPrivate : ZGModel.recommended)
+            .compactMap { r in available.first { $0.id == r.id }.map { ($0, r.note) } }
     }
 
     private var families: [(String, [ZGModel])] {
         let q = search.lowercased()
-        let shown = catalog.models.filter { q.isEmpty || $0.id.lowercased().contains(q) || $0.displayName.lowercased().contains(q) }
+        let shown = available.filter { q.isEmpty || $0.id.lowercased().contains(q) || $0.displayName.lowercased().contains(q) }
         let order = ["Claude", "GPT", "Gemini", "0G", "DeepSeek", "Qwen", "GLM", "Kimi", "MiniMax", "Other"]
         return Dictionary(grouping: shown, by: \.family)
             .map { ($0.key, $0.value.sorted { $0.id < $1.id }) }

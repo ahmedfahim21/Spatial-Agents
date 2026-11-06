@@ -1131,9 +1131,10 @@ final class MobileState {
         haptics.light()
         guard let wav else { send(heard); return }
         phase = .thinking
+        let isPrivate = agent(id)?.privateInference == true
         Task { @MainActor [weak self] in
             let started = Date()
-            let whisper = await self?.backend.transcribe(wav, timeout: 6)
+            let whisper = await self?.backend.transcribe(wav, timeout: 6, privateInference: isPrivate)
             guard let self, self.activeId == id, self.phase == .thinking else { return }
             let text = whisper?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             print("Agentsphere: whisper (\(Int(Date().timeIntervalSince(started) * 1000)) ms): \(text.isEmpty ? "–" : text) | on-device: \(heard)")

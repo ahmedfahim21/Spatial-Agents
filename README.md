@@ -27,6 +27,13 @@ Needs iOS 26, Xcode and AirPods with head tracking. Open `iOS/AgentsphereMobile.
 
 The backend is in `supabase/functions`: `chat` (0G Compute Router), `stt` (Whisper Large v3 on 0G) and `tts` (ElevenLabs).
 
+Each agent can opt in to **private inference**. Its model then runs on 0G's private tier, sealed in a TEE,
+and the model picker shows only TeeML models. With it off, the agent keeps the full catalogue. A private
+agent has no fallback: if its model is unavailable, the turn fails rather than dropping to a lower tier.
+This covers the model and speech to text. A reply is still sent to `tts` to be spoken.
+
+Test the routing with `deno test supabase/functions/chat/routing_test.ts`.
+
 ## Landing page
 
 Vite, React and Tailwind, styled from the iPhone app's design language (`iOS/App/Design.swift`).

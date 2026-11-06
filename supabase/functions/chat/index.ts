@@ -4,10 +4,13 @@
 // `[[order item=<n> qty=<q>]]` line, which is never streamed; instead this asks the visitor's
 // wallet agent (the pay function) to pay, and sends `data: {"order": ...}` events.
 import { admin, caller, cors, json } from "../_shared/common.ts";
+import { routeFor } from "./routing.ts";
 import { TOOL_PROMPT, toolsFor } from "./tools.ts";
 
 const ROUTER = "https://router-api.0g.ai/v1/chat/completions";
 const MODEL = Deno.env.get("ZG_MODEL") ?? "claude-haiku-5.5";
+// For agents on the private tier that haven't picked a model. Must be a TeeML model.
+const PRIVATE_MODEL = Deno.env.get("ZG_PRIVATE_MODEL") ?? "0gm-1.0-35b-a3b";
 const MAX_TURNS = 40;
 const MAX_CHARS = 2000;
 const MAX_TOOL_CHARS = 6000;
@@ -21,7 +24,7 @@ type Turn =
 type RawTurn = any;
 type AgentRow = {
   id: string; owner_id: string; name: string; anchor: string; visibility: string; greeting: string; context: string;
-  pricing: string; model: string | null; items: Item[];
+  pricing: string; model: string | null; private_inference: boolean; items: Item[];
 };
 type Item = { id: string; name: string; note: string; price_usdc: number };
 const ORDER = /\[\[\s*order\s+item\s*=\s*(\d+)\s+qty\s*=\s*(\d+)\s*\]\]/i;
@@ -37,7 +40,8 @@ async function loadAgent(db: ReturnType<typeof admin>, id: string): Promise<Agen
   let row: AgentRow | null = data
     ? {
       id: data.id, owner_id: data.owner_id, name: data.name, anchor: data.anchor, visibility: data.visibility,
-      greeting: data.greeting, context: data.context, pricing: data.pricing, model: data.model ?? null, items: [],
+      greeting: data.greeting, context: data.context, pricing: data.pricing, model: data.model ?? null,
+      private_inference: data.private_inference === true, items: [],
     }
     : null;
   if (row?.pricing === "paid" && row.visibility === "public") {
@@ -136,17 +140,20 @@ Deno.serve(async (req) => {
   const ask = (model: string, info?: ModelInfo) =>
     fetch(ROUTER, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}`, ...route.headers },
       body: JSON.stringify(completion(model, info, messages, tools, body.final === true)),
     });
   let upstream: Response;
-  const wanted = agent.model && agent.model !== MODEL ? agent.model : null;
-  const info = wanted ? (await chatModels()).get(wanted) : undefined;
-  if (wanted && info) {
-    upstream = await ask(wanted, info);
+  const route = routeFor(agent, { model: MODEL, privateModel: PRIVATE_MODEL });
+  const info = route.model !== MODEL ? (await chatModels()).get(route.model) : undefined;
+  if (route.private) {
+    // No fallback: the router enforces the tier, and a failure must stay a failure.
+    upstream = await ask(route.model, info);
+  } else if (route.fallback && info) {
+    upstream = await ask(route.model, info);
     // A model that's down or out of capacity shouldn't leave the agent speechless.
     if (!upstream.ok && upstream.status !== 402) {
-      console.error("0G model failed, using default", wanted, upstream.status, (await upstream.text().catch(() => "")).slice(0, 300));
+      console.error("0G model failed, using default", route.model, upstream.status, (await upstream.text().catch(() => "")).slice(0, 300));
       upstream = await ask(MODEL);
     }
   } else {
@@ -160,6 +167,8 @@ Deno.serve(async (req) => {
       ? "This agent's compute balance has run out."
       : upstream.status === 429
       ? "Too many requests right now. Try again in a moment."
+      : route.private && upstream.status === 503
+      ? "This agent's private model isn't available right now."
       : "The agent couldn't think right now.";
     return json({ error: message, status: upstream.status }, 502);
   }

@@ -127,6 +127,8 @@ final class Backend: @unchecked Sendable {
         var radiusM: Double
         /// Only sent when it changed.
         var model: String?
+        /// Only sent when it changed.
+        var privateInference: Bool?
     }
 
     func update(_ id: UUID, _ changes: AgentChanges) async throws -> Agent {
@@ -247,8 +249,9 @@ final class Backend: @unchecked Sendable {
     }
 
     /// What you said, by Whisper Large v3 on the 0G router. Nil if it fails or takes too long.
-    func transcribe(_ wav: Data, timeout: TimeInterval) async -> String? {
+    func transcribe(_ wav: Data, timeout: TimeInterval, privateInference: Bool) async -> String? {
         guard var req = try? await functionRequest("stt") else { return nil }
+        if privateInference { req.url = req.url?.appending(queryItems: [URLQueryItem(name: "private", value: "1")]) }
         req.httpMethod = "POST"
         req.timeoutInterval = timeout
         req.setValue("audio/wav", forHTTPHeaderField: "Content-Type")
