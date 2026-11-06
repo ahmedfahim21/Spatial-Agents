@@ -19,6 +19,19 @@ final class MobileState {
     let location = LocationService()
     let haptics = Haptics()
     private let tracker = HeadTracker()
+    /// Your left or right agent, picked by a quick turn of the head from wherever you face.
+    @ObservationIgnored private let glance = GlanceTracker()
+    /// The phone turning with you means your body turned (not just your head).
+    @ObservationIgnored private let phoneTurn = PhoneTurn()
+    /// How far a glance turns, degrees: 10 small, 14 medium, 20 large.
+    var glanceSize = UserDefaults.standard.object(forKey: "glanceSize") as? Double ?? 14 {
+        didSet {
+            UserDefaults.standard.set(glanceSize, forKey: "glanceSize")
+            glance.threshold = glanceSize
+        }
+    }
+    /// The side you're glancing at right now (the book's page that's lit).
+    private(set) var glanceSide: Zone?
     private let backend = Backend.shared
 
     // MARK: State the UI reads
@@ -175,17 +188,25 @@ final class MobileState {
                 return (id, z)
             })
         }
-        // Once you've set forward, agents stay put: turn right and the one on your right is
-        // in front of you. No drift, no re-centering after a long look, no following while
-        // walking. Only Recenter (calibrateForward) moves "front".
+        // The tracker reports head yaw in a fixed frame; GlanceTracker works out where "rest"
+        // (your body, roughly) is, so agents stay on your left and right as you turn and walk.
         tracker.followMe = false
+        glance.threshold = glanceSize
         tracker.onStatus = { [weak self] s in
             print("Agentsphere: tracking status: \(s)")
             self?.trackingStatus = s
         }
         tracker.onYaw = { [weak self] y in
             guard let self else { return }
-            self.yawBody = y
+            let now = ProcessInfo.processInfo.systemUptime
+            let phone = self.phoneTurn
+            let engaged = self.activeId != nil && self.phase != .idle
+            if self.glance.feed(time: now, yaw: y, phone: { phone.yaw(at: $0) }, engaged: engaged) {
+                let side = self.glance.side.map { $0 == .left ? Zone.left : Zone.right }
+                print("Agentsphere: glance \(side?.name ?? "back to rest") (offset \(Int(self.glance.offset))°)")
+                self.glanceSide = side
+            }
+            self.yawBody = self.glance.offset
             self.lastHeadAt = Date()
             if !self.hasHeadData {
                 self.hasHeadData = true
@@ -193,7 +214,7 @@ final class MobileState {
             }
             if Date().timeIntervalSince(self.lastYawLog) > 2 {
                 self.lastYawLog = Date()
-                print(String(format: "Agentsphere: head yaw %.0f° (fixed %.0f°) pitch %.0f°", y, self.yawFixed, self.pitchRaw))
+                print(String(format: "Agentsphere: head %.0f° from rest (fixed %.0f°) pitch %.0f°", self.yawBody, self.yawFixed, self.pitchRaw))
             }
             self.updateScene()
         }
@@ -231,6 +252,7 @@ final class MobileState {
         AudioSession.configure()
         refreshRoute()
         tracker.start()
+        phoneTurn.start()
         location.start()
         Task { await refreshMine() }
         Task { await refreshIdentity() }
@@ -552,6 +574,7 @@ final class MobileState {
     /// "This is forward": the current head direction becomes the front of your space.
     func calibrateForward() {
         tracker.recenter()
+        glance.reset()
         pitchZero = pitchRaw
         UserDefaults.standard.set(pitchZero, forKey: "pitchZero")
         worldOffset = nil
@@ -616,13 +639,17 @@ final class MobileState {
         // front would wake on its own.
         let pool = (lookingEnabled ? talkable : talkable.filter { $0.id == activeId })
             .filter { hasHeadData || $0.isGeo }
-        let candidates = pool.compactMap { a -> (UUID, Double)? in
+        // Your agents: the side you glance at. Agents out in the world: where you look.
+        let glanced = glanceSide.flatMap { side in pool.first { bodySlots[$0.id] == side } }
+        let candidates = pool.filter { bodySlots[$0.id] == nil || !withMe }.compactMap { a -> (UUID, Double)? in
             guard let az = exactAngle(a.id) else { return nil }
             guard let el = exactElevation(a.id) else { return (a.id, abs(az)) }
             return (a.id, (az * az + el * el * 1.2).squareRoot())
         }
         var next: UUID?
-        if let cur = focusedId, let c = candidates.first(where: { $0.0 == cur }), c.1 < 34 {
+        if let glanced {
+            next = glanced.id
+        } else if let cur = focusedId, let c = candidates.first(where: { $0.0 == cur }), c.1 < 34 {
             next = cur   // hysteresis: keep focus until clearly looking elsewhere
         } else if let best = candidates.filter({ $0.1 < 24 }).min(by: { $0.1 < $1.1 }) {
             next = best.0
@@ -1120,6 +1147,7 @@ final class MobileState {
 
     func recenter() {
         tracker.recenter()
+        glance.reset()
         worldOffset = nil
         calibrateWorld()
     }

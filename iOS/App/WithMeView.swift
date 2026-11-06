@@ -13,10 +13,10 @@ struct WithMeView: View {
                         EmptyWithMe()
                     } else {
                         if !state.calibrated { setupPrompt }
-                        // Radar and caption follow your head; they're their own views so
+                        // The book and caption follow your head; they're their own views so
                         // the rest of the screen doesn't redraw as you turn.
                         VStack(spacing: 18) {
-                            Radar()
+                            BookView()
                             Caption()
                         }
                         agentList
@@ -103,84 +103,21 @@ private struct Caption: View {
         let title: String = {
             if let active { return "Talking to \(active.name)" }
             if let focused { return "Nod to talk to \(focused.name)" }
-            if state.hasHeadData { return "Look at an agent, then nod" }
+            if state.hasHeadData { return "Glance left or right, then nod" }
             return "Put in your AirPods to look around"
         }()
         return VStack(spacing: 4) {
             Text(title)
                 .font(.headline)
                 .contentTransition(.opacity)
-            Text(state.hasHeadData ? "Facing \(Int(normalize360(state.headYaw)))° · AirPods head tracking"
-                                   : "They'll sit around your head. Turn to one and nod to talk.")
+            Text(state.hasHeadData ? "A small turn of the head picks a side, whichever way you're facing."
+                                   : "They sit just left and right of you. Glance at one and nod to talk.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
                 .multilineTextAlignment(.center)
         }
         .animation(Motion.snappy, value: title)
-    }
-}
-
-/// Top-down view of you and your agents: front is up, your gaze is the cone.
-private struct Radar: View {
-    @Environment(MobileState.self) private var state
-    private let radius: CGFloat = 112
-
-    var body: some View {
-        ZStack {
-            Circle().stroke(Color(.systemGray4), lineWidth: 0.75)
-                .frame(width: radius * 2, height: radius * 2)
-            if state.hasHeadData {
-                GazeCone()
-                    .fill(RadialGradient(colors: [Color.primary.opacity(0.16), Color.primary.opacity(0)],
-                                         center: .bottom, startRadius: 0, endRadius: radius * 1.1))
-                    .frame(width: radius * 1.1, height: radius * 1.15)
-                    .offset(y: -radius * 0.575)
-                    .rotationEffect(.degrees(state.headYaw))
-                    .transition(.opacity)
-            }
-            Circle()
-                .fill(Color(.secondarySystemGroupedBackground))
-                .frame(width: 44, height: 44)
-                .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
-                .overlay(Image(systemName: "person.fill").foregroundStyle(.secondary))
-            ForEach(state.bodyAgents) { agent in
-                if let zone = state.zones[agent.id] {
-                    placed(agent, zone)
-                }
-            }
-        }
-        .frame(width: radius * 2 + 64, height: radius * 2 + 64)
-        .animation(Motion.smooth, value: state.zones)
-        .animation(Motion.snappy, value: state.hasHeadData)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Your agents around you")
-    }
-
-    /// Each window's agent sits on the ring at its side.
-    private func placed(_ agent: Agent, _ zone: Zone) -> some View {
-        let r = radius
-        let a = zone.azimuth * .pi / 180
-        let size: CGFloat = 52
-        let focused = state.focusedId == agent.id
-        return ZStack {
-            FocusRing(active: focused, diameter: size + 14, lineWidth: 3, showsTrack: false)
-            BotView(agent: agent, mood: state.mood(for: agent), size: size, look: -sin(a))
-        }
-        .offset(x: sin(a) * r, y: -cos(a) * r)
-        .animation(Motion.snappy, value: focused)
-    }
-}
-
-/// A wedge pointing up from the bottom centre: where you're looking.
-private struct GazeCone: Shape {
-    func path(in r: CGRect) -> Path {
-        var p = Path()
-        p.move(to: CGPoint(x: r.midX, y: r.maxY))
-        p.addLine(to: CGPoint(x: r.minX + r.width * 0.12, y: r.minY))
-        p.addQuadCurve(to: CGPoint(x: r.maxX - r.width * 0.12, y: r.minY), control: CGPoint(x: r.midX, y: r.minY - r.height * 0.08))
-        p.closeSubpath()
-        return p
     }
 }
 

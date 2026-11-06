@@ -14,6 +14,11 @@ struct SettingsView: View {
                 Section("Head tracking") {
                     LabeledContent(state.hasHeadData ? state.routeName : "AirPods", value: state.hasHeadData ? "Tracking" : "Not connected")
                     Toggle("Agents with me", isOn: $state.withMe).tint(.green)
+                    Picker("Glance to pick", selection: $state.glanceSize) {
+                        Text("Small").tag(10.0)
+                        Text("Medium").tag(14.0)
+                        Text("Large").tag(20.0)
+                    }
                     Button("Recenter") { state.calibrateForward() }
                         .disabled(!state.hasHeadData)
                     Button("Arrange your space") { arranging = true }

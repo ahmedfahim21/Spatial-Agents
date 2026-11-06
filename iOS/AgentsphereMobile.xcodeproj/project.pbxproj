@@ -27,6 +27,7 @@
 		56A32DAAF9F4CAB9CA9DF247 /* Payments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 671C0812D64D154BA89F8B87 /* Payments.swift */; };
 		606FF9686D034A823B9403C1 /* SetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F2F318535326CF01C65DE81 /* SetupView.swift */; };
 		643E59DFA0B4A1D7AB012C4A /* AgentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91D87BBBE986BED91DEE366F /* AgentsView.swift */; };
+		6714CFCB4102C0B0E8F66340 /* BookView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20F35CC3267E59F9BA4E1D3 /* BookView.swift */; };
 		68905B9AA26384CC2E810ADC /* AudioCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F68D207AE23DC67D59CC51E /* AudioCore.swift */; };
 		711203F7DB33AFCDFF87D218 /* MobileState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFB8E080CD8FD26234ABA4D /* MobileState.swift */; };
 		74990383F5AF620D0D0563D1 /* ExploreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F2DD316B90227E4E4F68B2F /* ExploreView.swift */; };
@@ -37,6 +38,7 @@
 		AADB242144BAC2BF4DAF2381 /* ConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D29CE04B8CBB324C3342373 /* ConversationView.swift */; };
 		AE08EFA932A5B527FA4E77DA /* Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B42CE28424418C4C9ADB2EF /* Config.swift */; };
 		B39D2E980E57456BC3915EE8 /* PositionFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BB318E4F929F2C2DC23056E /* PositionFilter.swift */; };
+		C5A2372754A8361943A5FD69 /* Glance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21C3D1A47DBF00BAC44386F8 /* Glance.swift */; };
 		C668412E830D38E1B763F8CA /* GeoMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5241CFF9F58D3214E5B9A117 /* GeoMath.swift */; };
 		CD6D387AF35D4BDEE9693852 /* FindView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E864C79FC8DB3608130090D1 /* FindView.swift */; };
 		D1AEBEF216C21E8CCED77494 /* ConversationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CED646D675DD68032EC19A40 /* ConversationStore.swift */; };
@@ -52,6 +54,7 @@
 		094CD02559ADA21BAB95E7CC /* Onboarding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Onboarding.swift; sourceTree = "<group>"; };
 		0DA6F87A37140AB1EA446470 /* Agentsphere.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Agentsphere.entitlements; sourceTree = "<group>"; };
 		129078631BF72C0A4598FAC3 /* LocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationService.swift; sourceTree = "<group>"; };
+		21C3D1A47DBF00BAC44386F8 /* Glance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Glance.swift; sourceTree = "<group>"; };
 		21E5A9B40DF845E88482B02B /* AgentsphereMobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentsphereMobileApp.swift; sourceTree = "<group>"; };
 		21F270FF6631D57EC3A4C7D4 /* Backend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Backend.swift; sourceTree = "<group>"; };
 		24455A322521E16DC888C5AE /* CreateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateView.swift; sourceTree = "<group>"; };
@@ -80,6 +83,7 @@
 		9F2F318535326CF01C65DE81 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
 		A3B2F17A42BC791B0509F143 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		A9044571EEF85C5469B0623E /* HeadTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadTracker.swift; sourceTree = "<group>"; };
+		B20F35CC3267E59F9BA4E1D3 /* BookView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BookView.swift; sourceTree = "<group>"; };
 		B57B94C786F17730C8DE2D42 /* AudioSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSession.swift; sourceTree = "<group>"; };
 		B69F15A31B9B49E666E03F9C /* SpatialAudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpatialAudio.swift; sourceTree = "<group>"; };
 		CE8B797E41D3654BCD51DBB4 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
@@ -151,6 +155,7 @@
 				01DD457189703CC1DE06BD20 /* AgentTemplates.swift */,
 				2AC38C1D24165F854536FE58 /* Assets.xcassets */,
 				21F270FF6631D57EC3A4C7D4 /* Backend.swift */,
+				B20F35CC3267E59F9BA4E1D3 /* BookView.swift */,
 				3152B5494B1B57B6F4E97B9E /* Bot.swift */,
 				6B42CE28424418C4C9ADB2EF /* Config.swift */,
 				CED646D675DD68032EC19A40 /* ConversationStore.swift */,
@@ -161,6 +166,7 @@
 				8F2DD316B90227E4E4F68B2F /* ExploreView.swift */,
 				E864C79FC8DB3608130090D1 /* FindView.swift */,
 				5241CFF9F58D3214E5B9A117 /* GeoMath.swift */,
+				21C3D1A47DBF00BAC44386F8 /* Glance.swift */,
 				4D6559DE46AF8B2FBED0ADAF /* Haptics.swift */,
 				A3B2F17A42BC791B0509F143 /* Info.plist */,
 				129078631BF72C0A4598FAC3 /* LocationService.swift */,
@@ -267,6 +273,7 @@
 				68905B9AA26384CC2E810ADC /* AudioCore.swift in Sources */,
 				1BDE38DCECCFF38119FCED1F /* AudioSession.swift in Sources */,
 				A6D60F5186BC713DD5708C4D /* Backend.swift in Sources */,
+				6714CFCB4102C0B0E8F66340 /* BookView.swift in Sources */,
 				48E1658AF8070914CEF75CE5 /* Bot.swift in Sources */,
 				AE08EFA932A5B527FA4E77DA /* Config.swift in Sources */,
 				D1AEBEF216C21E8CCED77494 /* ConversationStore.swift in Sources */,
@@ -277,6 +284,7 @@
 				74990383F5AF620D0D0563D1 /* ExploreView.swift in Sources */,
 				CD6D387AF35D4BDEE9693852 /* FindView.swift in Sources */,
 				C668412E830D38E1B763F8CA /* GeoMath.swift in Sources */,
+				C5A2372754A8361943A5FD69 /* Glance.swift in Sources */,
 				FEAA581B15E5279728FC6D9A /* Haptics.swift in Sources */,
 				0713BC9DE0F081976C28781C /* HeadTracker.swift in Sources */,
 				3DAC83BD909EBF237D5E0E54 /* LocationService.swift in Sources */,

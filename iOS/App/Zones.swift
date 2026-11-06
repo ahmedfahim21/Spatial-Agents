@@ -8,8 +8,9 @@ enum Zone: String, CaseIterable, Codable, Identifiable {
 
     var id: String { rawValue }
 
-    /// Degrees, + = right.
-    var azimuth: Double { self == .left ? -55 : 55 }
+    /// Where its voice comes from, degrees from your rest direction (+ = right). Just past
+    /// the edge of what you're looking at; a small glance that way picks it.
+    var azimuth: Double { self == .left ? -45 : 45 }
 
     /// Degrees above eye level.
     var elevation: Double { 0 }
