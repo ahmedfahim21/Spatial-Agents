@@ -63,12 +63,9 @@ struct RadarView: View {
                     .frame(width: r, height: r)
                     .position(center)
 
-                FocusCone(yaw: state.headYaw, width: state.focusWidth)
-                    .fill(Color.accentColor.opacity(0.14))
+                HeadCone(head: state.head, width: state.focusWidth, opacity: 0.14)
                     .frame(width: r * 2, height: r * 2)
                     .position(center)
-                    // AirPods report ~25 times a second; glide between updates.
-                    .animation(.linear(duration: 0.045), value: state.headYaw)
 
                 Image(systemName: "person.crop.circle")
                     .font(.system(size: 34))
@@ -113,6 +110,30 @@ struct RadarView: View {
         let a = azimuth * .pi / 180
         return CGPoint(x: center.x + radius * CGFloat(sin(a)),
                        y: center.y - radius * CGFloat(cos(a)))
+    }
+}
+
+/// The facing wedge, redrawn on head motion without redrawing its parent.
+struct HeadCone: View {
+    @ObservedObject var head: HeadMotion
+    let width: Double
+    var opacity = 0.14
+    var follow = true
+
+    var body: some View {
+        FocusCone(yaw: follow ? head.yaw : 0, width: width)
+            .fill(Color.accentColor.opacity(opacity))
+            // AirPods report ~25 times a second; glide between updates.
+            .animation(.linear(duration: 0.045), value: head.yaw)
+    }
+}
+
+struct HeadReadout: View {
+    @ObservedObject var head: HeadMotion
+    let target: String
+
+    var body: some View {
+        Text("Facing \(Int(head.yaw))° → \(target) · pitch \(Int(head.pitch))°").monospacedDigit()
     }
 }
 
@@ -198,15 +219,13 @@ struct ControlPanel: View {
             GroupBox("Head") {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(state.headStatus).font(.caption).foregroundStyle(.secondary)
-                    Text("Facing \(Int(state.headYaw))° → \(state.target?.name ?? "nobody")")
-                        .monospacedDigit()
+                    HeadReadout(head: state.head, target: state.target?.name ?? "nobody")
                     HStack {
                         Button("Recenter") { state.recenter() }
                             .keyboardShortcut("r", modifiers: .option)
                         Toggle("Invert direction", isOn: $state.invertHead)
                     }
                     HStack {
-                        Text("Pitch \(Int(state.headPitch))°").monospacedDigit()
                         Spacer()
                         Text("Last gesture: \(state.lastGesture)").bold()
                     }

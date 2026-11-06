@@ -43,6 +43,7 @@ struct SoundLabView: View {
 
 struct LabMap: View {
     @EnvironmentObject var lab: SoundLab
+    @EnvironmentObject var state: AppState
     let viewRadius: Double
     let logScale: Bool
     let newSound: LabSound
@@ -74,11 +75,9 @@ struct LabMap: View {
                     .position(x: center.x, y: center.y - r - 10)
 
                 // You, with a wedge showing where your head points.
-                FocusCone(yaw: lab.followHead ? lab.headYaw : 0, width: 20)
-                    .fill(Color.accentColor.opacity(0.18))
+                HeadCone(head: state.head, width: 20, opacity: 0.18, follow: lab.followHead)
                     .frame(width: 90, height: 90)
                     .position(center)
-                    .animation(.linear(duration: 0.045), value: lab.headYaw)
                 Image(systemName: "person.crop.circle.fill")
                     .font(.system(size: 26))
                     .position(center)
@@ -206,7 +205,7 @@ struct LabPanel: View {
                     Text("Check the direction: put a sound in front and turn right. It should slide to your LEFT ear. If it goes right, tick Invert direction in the main window.")
                         .font(.caption).foregroundStyle(.secondary)
                     HStack {
-                        Text("Facing \(Int(lab.headYaw))°").monospacedDigit()
+                        HeadReadout(head: state.head, target: "Sound Lab")
                         Spacer()
                         Button("Recenter") { state.recenter() }
                     }
@@ -281,8 +280,21 @@ struct LabPanel: View {
     }
 }
 
+struct NoseReadout: View {
+    @ObservedObject var head: HeadMotion
+    let source: LabSource
+    let follow: Bool
+
+    var body: some View {
+        let rel = normalizeAngle(source.azimuth - (follow ? head.yaw : 0))
+        Text("\(SoundLabView.meters(source.distance)) away · \(Int(source.azimuth))° in room · \(Int(rel))° from your nose")
+            .font(.caption).monospacedDigit()
+    }
+}
+
 struct SourceEditor: View {
     @EnvironmentObject var lab: SoundLab
+    @EnvironmentObject var state: AppState
     let source: LabSource
 
     private func bind<T>(_ key: WritableKeyPath<LabSource, T>) -> Binding<T> {
@@ -305,9 +317,7 @@ struct SourceEditor: View {
                     Button(role: .destructive) { lab.remove(source.id) } label: { Image(systemName: "trash") }
                 }
 
-                let rel = normalizeAngle(source.azimuth - (lab.followHead ? lab.headYaw : 0))
-                Text("\(SoundLabView.meters(source.distance)) away · \(Int(source.azimuth))° in room · \(Int(rel))° from your nose")
-                    .font(.caption).monospacedDigit()
+                NoseReadout(head: state.head, source: source, follow: lab.followHead)
                 Text(String(format: "Distance model: %.1f dB · echo send %.2f", lab.expectedGainDB(at: source.distance), lab.effectiveEcho(source)))
                     .font(.caption).monospacedDigit().foregroundStyle(.secondary)
 

@@ -5,7 +5,9 @@ final class AppState: ObservableObject {
     @Published var sessions: [AgentSession] = []
     @Published var selectedId: UUID?
     @Published var focusedId: UUID?
-    @Published var headYaw: Double = 0
+    /// Latest head yaw for logic; views observe `head` instead (see HeadMotion).
+    private(set) var headYaw: Double = 0
+    let head = HeadMotion()
     @Published var headStatus = "Starting head tracking…"
     @Published var isListening = false
     /// Listen automatically when you face an agent; no button needed.
@@ -17,14 +19,15 @@ final class AppState: ObservableObject {
     @Published var typed = ""
     @Published var log: [LogEntry] = []
     @Published var extraArgs = ""
-    @Published var headPitch: Double = 0
     @Published var lastGesture = "—"
     @Published var pending: [PermissionRequest] = []
     @Published var serverStatus = "Starting permission server…"
     @Published var voiceStatus = ""
     @Published var voiceEngine = ""
     @Published var elevenKeyInput = ""
-    @Published var showDiscover = false
+    @Published var showDiscover = false {
+        didSet { showDiscover ? stopListening() : scheduleHandsFree() }
+    }
     @Published var discovered: [DiscoveredSession] = []
     @Published var scanning = false
     @Published var permissionTimeout: Double = 60
@@ -49,7 +52,7 @@ final class AppState: ObservableObject {
         audio = SpatialAudio(voices: voices)
         tracker.onYaw = { [weak self] yaw in self?.handleYaw(yaw) }
         tracker.onStatus = { [weak self] s in DispatchQueue.main.async { self?.headStatus = s } }
-        tracker.onPitch = { [weak self] p in self?.headPitch = p }
+        tracker.onPitch = { [weak self] p in self?.head.pitch = p }
         tracker.onGesture = { [weak self] g in self?.handleGesture(g) }
         speech.onPartial = { [weak self] t in self?.heard(t) }
         server.onRequest = { [weak self] r in self?.handlePermission(r) }
@@ -82,6 +85,7 @@ final class AppState: ObservableObject {
 
     private func handleYaw(_ yaw: Double) {
         headYaw = yaw
+        head.yaw = yaw
         audio.headYaw = yaw
         lab.setHeadYaw(yaw)
         updateFocus()
@@ -343,14 +347,14 @@ final class AppState: ObservableObject {
     /// Opens the mic after you've faced an agent for a moment.
     private func scheduleHandsFree() {
         dwellWork?.cancel()
-        guard handsFree, focusedId != nil, !isListening, !agentsSpeaking, pendingSend == nil else { return }
+        guard handsFree, focusedId != nil, !isListening, !agentsSpeaking, pendingSend == nil, !showDiscover else { return }
         let work = DispatchWorkItem { [weak self] in self?.startHandsFree() }
         dwellWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
     }
 
     private func startHandsFree() {
-        guard handsFree, let id = focusedId, !isListening, !agentsSpeaking, pendingSend == nil else { return }
+        guard handsFree, let id = focusedId, !isListening, !agentsSpeaking, pendingSend == nil, !showDiscover else { return }
         speech.begin { [weak self] error in
             guard let self else { return }
             if let error {

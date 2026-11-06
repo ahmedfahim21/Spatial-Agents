@@ -7,7 +7,9 @@ import Speech
 /// Push-to-talk: transcribes your voice on-device (when supported).
 final class SpeechInput {
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
-    private let engine = AVAudioEngine()
+    /// Rebuilt for every listening session: AVAudioEngine caches the input format, and
+    /// after switching devices a stale format crashes installTap.
+    private var engine = AVAudioEngine()
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var tapInstalled = false
@@ -55,6 +57,7 @@ final class SpeechInput {
         if recognizer.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
         request = req
 
+        engine = AVAudioEngine()
         let input = engine.inputNode
         if preferBuiltInMic, let unit = input.audioUnit, var mic = Self.builtInMic() {
             let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
@@ -63,7 +66,11 @@ final class SpeechInput {
         } else {
             inputName = "Default input"
         }
-        let fmt = input.outputFormat(forBus: 0)
+        // The hardware's real format after the device switch; the tap must match it exactly.
+        let fmt = input.inputFormat(forBus: 0)
+        guard fmt.sampleRate > 0, fmt.channelCount > 0 else {
+            throw NSError(domain: "Agentsphere", code: 2, userInfo: [NSLocalizedDescriptionKey: "No usable microphone input (\(inputName))"])
+        }
         input.installTap(onBus: 0, bufferSize: 1024, format: fmt) { buffer, _ in req.append(buffer) }
         tapInstalled = true
         engine.prepare()

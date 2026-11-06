@@ -131,7 +131,9 @@ final class SoundLab: ObservableObject {
 
     @Published var sources: [LabSource] = []
     @Published var selectedId: UUID?
-    @Published var headYaw: Double = 0
+    /// Not @Published: the lab views read head motion from AppState.head so the whole
+    /// lab doesn't redraw 25 times a second.
+    private(set) var headYaw: Double = 0
 
     @Published var followHead = true { didSet { updatePositions() } }
     /// macOS 15+: let the system rotate the listener with the AirPods (lower latency than our own tracking).

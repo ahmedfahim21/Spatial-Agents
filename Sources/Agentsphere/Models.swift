@@ -26,6 +26,13 @@ struct AgentSession: Identifiable, Equatable {
     var lastReply: String = ""
 }
 
+/// Head orientation, ~25 updates a second. Kept out of AppState so only the views that
+/// draw the head redraw; otherwise every window re-renders on every head movement.
+final class HeadMotion: ObservableObject {
+    @Published var yaw: Double = 0
+    @Published var pitch: Double = 0
+}
+
 /// An instruction heard hands-free, sent after a short window unless you shake.
 struct PendingSend: Identifiable {
     let id = UUID()
