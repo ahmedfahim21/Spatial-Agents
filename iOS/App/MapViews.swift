@@ -18,13 +18,13 @@ struct ExploreMap: View {
 
     var body: some View {
         Map(position: $camera, selection: $selected) {
-            // Your dot, with a cone for where you're facing (relative to the map's rotation).
-            let facing = pointing.map { normalize360($0 - mapHeading) }
+            // Your dot, with a cone for where you're facing. The dot reads the direction itself,
+            // so turning only re-renders the dot, never this map.
             if let sim = state.location.simulated {
-                Annotation("You", coordinate: sim, anchor: .center) { YouDot(facing: facing).equatable() }
+                Annotation("You", coordinate: sim, anchor: .center) { YouDot(state: state, map: mapRotation) }
                     .annotationTitles(.hidden)
             } else {
-                UserAnnotation(anchor: .center) { _ in YouDot(facing: facing).equatable() }
+                UserAnnotation(anchor: .center) { _ in YouDot(state: state, map: mapRotation) }
             }
             ForEach(state.nearby.filter { $0.coordinate != nil }) { a in
                 MapCircle(center: a.coordinate!, radius: a.radiusM)
@@ -50,8 +50,7 @@ struct ExploreMap: View {
             MapCompass()
         }
         .onMapCameraChange(frequency: .continuous) { ctx in
-            let h = YouDot.step(ctx.camera.heading)
-            if h != mapHeading { mapHeading = h }
+            mapRotation.degrees = ctx.camera.heading
         }
         // Start at street level around you, once we know where you are.
         .onChange(of: state.location.hasFix, initial: true) { _, hasFix in
@@ -62,14 +61,8 @@ struct ExploreMap: View {
     }
 
     @State private var framed = false
-    /// The map's rotation, in steps (see `YouDot.step`).
-    @State private var mapHeading: Double = 0
-
-    /// Where you're facing, degrees from true north: your head when AirPods are tracking,
-    /// otherwise the phone. In steps, so the dot isn't re-measured on every sensor tick.
-    private var pointing: Double? {
-        (state.headWorld ?? state.location.heading).map(YouDot.step)
-    }
+    /// The map's rotation. Only the dot reads it.
+    @State private var mapRotation = MapRotation()
 
     /// The still version of a mood, for the map.
     private func still(_ mood: BotMood) -> BotMood {
@@ -121,21 +114,34 @@ private struct MapBot: View, Equatable {
 }
 
 /// Your position in demo mode (the real one uses MapKit's own dot).
-/// You on the map: a blue dot, and a soft cone toward where you're facing.
-private struct YouDot: View, Equatable {
-    /// Degrees clockwise from the top of the screen; nil = unknown (no cone).
-    let facing: Double?
+/// The map camera's heading, shared with the dot without redrawing the map.
+@Observable final class MapRotation {
+    var degrees: Double = 0
+}
 
-    /// Rounds a direction to 4° steps: smooth enough to read, rare enough to redraw.
-    static func step(_ degrees: Double) -> Double { (normalize360(degrees) / 4).rounded() * 4 }
+/// You on the map: a blue dot, and a soft cone toward where you're facing: your head when
+/// AirPods are tracking, otherwise the phone. Only the cone's rotation changes as you turn
+/// (fixed size, so MapKit never re-measures it), animated between readings so it glides.
+private struct YouDot: View {
+    // Passed in, not from the environment: annotation content lives outside the view tree.
+    let state: MobileState
+    let map: MapRotation
+    /// The cone's angle, unwrapped (it can pass 360) so crossing north turns the short way.
+    @State private var shown: Double?
+
+    /// Degrees clockwise from the top of the screen; nil = unknown (no cone).
+    private var facing: Double? {
+        (state.headWorld ?? state.location.heading).map { normalize360($0 - map.degrees) }
+    }
 
     var body: some View {
         ZStack {
-            if let facing {
+            if let shown {
                 Cone()
                     .fill(RadialGradient(colors: [Color.blue.opacity(0.45), Color.blue.opacity(0)],
                                          center: .center, startRadius: 6, endRadius: 46))
-                    .rotationEffect(.degrees(facing))
+                    .rotationEffect(.degrees(shown))
+                    .transition(.opacity)
             }
             Circle().fill(Color.blue).frame(width: 16, height: 16)
                 .overlay(Circle().stroke(.white, lineWidth: 3))
@@ -143,6 +149,13 @@ private struct YouDot: View, Equatable {
         }
         .frame(width: 96, height: 96)
         .allowsHitTesting(false)
+        .onChange(of: facing, initial: true) { _, target in
+            guard let target else { withAnimation(.easeOut(duration: 0.2)) { shown = nil }; return }
+            guard let from = shown else { shown = target; return }
+            // Shortest way round: -180...180 from where it is now.
+            let delta = (target - normalize360(from) + 540).truncatingRemainder(dividingBy: 360) - 180
+            withAnimation(.linear(duration: 0.12)) { shown = from + delta }
+        }
     }
 
     /// A 70° wedge from the centre, pointing up.
