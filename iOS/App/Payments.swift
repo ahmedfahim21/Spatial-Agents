@@ -600,6 +600,7 @@ struct WalletSection: View {
     @State private var budget = 20.0
     @State private var loaded = false
     @State private var verifying = false
+    @State private var worldProblem: String?
 
     var body: some View {
         Section {
@@ -621,20 +622,45 @@ struct WalletSection: View {
             }
             if let identity = state.worldIdentity {
                 LabeledContent("World ID") {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.seal.fill").foregroundStyle(.white, .blue)
-                        Text(identity.level)
+                    VStack(alignment: .trailing, spacing: 1) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.seal.fill").foregroundStyle(.white, .blue)
+                            Text(identity.level)
+                        }
+                        if let date = identity.date {
+                            Text("Verified \(date.formatted(.relative(presentation: .named)))")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
-            } else {
-                Button(verifying ? "Opening World ID…" : "Verify with World ID") {
-                    verifying = true
-                    Task { _ = await state.verifyWithWorld(); verifying = false }
-                }
-                .disabled(verifying)
             }
+            // Verifying again refreshes the check (e.g. after a better World ID level, or to
+            // link a different World ID to this account).
+            Button {
+                verifying = true
+                worldProblem = nil
+                Task {
+                    switch await state.verifyWithWorld() {
+                    case .ok, .cancelled: break
+                    case .denied: worldProblem = "World ID didn't confirm a verified human."
+                    case .failed(let why): worldProblem = why
+                    }
+                    verifying = false
+                }
+            } label: {
+                HStack {
+                    Text(verifying ? "Opening World ID…" : state.worldIdentity == nil ? "Verify with World ID" : "Verify again")
+                    Spacer()
+                    if verifying { ProgressView() }
+                }
+            }
+            .disabled(verifying)
         } header: { Text("Wallet") } footer: {
-            Text("Your wallet agent pays shop agents for you in test USDC on Hedera. Above \(Money.usd(autoLimit)), or past today's budget, it asks you to approve with World ID first.")
+            if let worldProblem {
+                Text(worldProblem).foregroundStyle(.orange)
+            } else {
+                Text("Your wallet agent pays shop agents for you in test USDC on Hedera. Above \(Money.usd(autoLimit)), or past today's budget, it asks you to approve with World ID first.")
+            }
         }
         .task { await load() }
         .onChange(of: autoLimit) { _, _ in saveSoon() }

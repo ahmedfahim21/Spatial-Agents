@@ -154,10 +154,11 @@ async function callback(req: Request): Promise<Response> {
     // Only the human who owns this wallet can approve its spending.
     return deny("denied", "a different World ID");
   }
-  if (!mine) {
-    // First verification for this account: link it. One human, one account: if this World ID
-    // was linked to another (e.g. an old install), it moves here.
-    await db.from("world_identities").delete().eq("iss", ISSUER).eq("sub", sub);
+  if (!mine || mine.sub !== sub) {
+    // First verification for this account, or verifying again with a different World ID:
+    // link it. One human, one account: if this World ID was linked to another (e.g. an old
+    // install), it moves here.
+    await db.from("world_identities").delete().eq("iss", ISSUER).eq("sub", sub).neq("user_id", uid);
   }
   const { error } = await db.from("world_identities").upsert({
     user_id: uid, iss: ISSUER, sub, acr, verified_at: new Date().toISOString(),
