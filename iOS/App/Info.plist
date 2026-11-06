@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>AgentsphereHealthKit</key>
+	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -20,6 +22,14 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSAlarmKitUsageDescription</key>
+	<string>Your agents can set alarms and timers when you ask.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Your agents can tell you what's on your calendar and add events when you ask.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Your agents can tell you about your steps, sleep, workouts and heart rate when you ask. Health data stays on your iPhone except for the answer to your question.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Agentsphere doesn't write to Apple Health.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Agentsphere can tell you when an agent is nearby.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
@@ -28,6 +38,8 @@
 	<string>Agentsphere listens when you face an agent so you can talk to it hands-free.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>AirPods head tracking lets you face an agent to select it and nod or shake to answer.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Your agents can read your to-dos and add or tick off reminders when you ask.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Your words are transcribed on-device and sent to the agent you're talking to.</string>
 	<key>UIBackgroundModes</key>

@@ -55,18 +55,23 @@ struct CreateView: View {
         NavigationStack {
             Form {
                 Section {
-                    TemplatePicker(selected: template) { apply($0) }
-                        .listRowInsets(EdgeInsets())
-                        .listRowBackground(Color.clear)
-                } header: { Text("Start from") }
-
-                Section {
                     Picker("Type", selection: $state.createFlavor) {
                         ForEach(AgentFlavor.allCases) { Text($0.rawValue).tag($0) }
                     }
                     .pickerStyle(.segmented)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
+                } header: {
+                    // In the header, not a row: rows clip to their rounded bounds, which sliced
+                    // the cards. Here the row scrolls edge to edge.
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Start from")
+                        // Out to the screen edges; the cards line up with the form below.
+                        TemplatePicker(selected: template, inset: 16) { apply($0) }
+                            .padding(.horizontal, -32)
+                    }
+                    .textCase(nil)
+                    .padding(.bottom, 14)
                 } footer: {
                     Text(flavor.detail).contentTransition(.opacity).animation(Motion.snappy, value: flavor)
                 }

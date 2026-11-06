@@ -89,6 +89,8 @@ struct AgentTemplate: Identifiable, Equatable {
 /// The row of templates at the top of Create.
 struct TemplatePicker: View {
     let selected: AgentTemplate?
+    /// Leading and trailing space before the first and after the last card.
+    var inset: CGFloat = 20
     let pick: (AgentTemplate) -> Void
 
     var body: some View {
@@ -99,8 +101,8 @@ struct TemplatePicker: View {
                     Button { pick(t) } label: {
                         VStack(spacing: 6) {
                             BotView(color: t.color, shape: t.shape, mood: on ? .arrived : .idle, size: 34, seed: 0.3)
-                            Text(t.title).font(.caption.weight(.semibold)).lineLimit(1)
-                            Text(t.flavor.rawValue).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            Text(t.title).font(.caption.weight(.semibold)).foregroundStyle(Color.primary).lineLimit(1)
+                            Text(t.flavor.rawValue).font(.caption2).foregroundStyle(Color.secondary).lineLimit(1)
                         }
                         .frame(width: 92, height: 92)
                         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -114,15 +116,9 @@ struct TemplatePicker: View {
                     .accessibilityAddTraits(on ? .isSelected : [])
                 }
             }
+            .padding(.horizontal, inset)
             .padding(.vertical, 2)
         }
-        // Form rows clip at their edges, so stay inside and fade out on the right instead:
-        // it reads as "more this way" rather than a card sliced off.
-        .mask {
-            HStack(spacing: 0) {
-                Color.black
-                LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: 28)
-            }
-        }
+        .scrollClipDisabled()
     }
 }

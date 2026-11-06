@@ -144,9 +144,10 @@ struct MessageBubble: View {
                 Spacer(minLength: 56)
             }
         case .tool(let name):
-            Label(message.text, systemImage: AgentTool.owning(name)?.icon ?? "wrench.and.screwdriver")
+            let failed = name.hasSuffix("!")
+            Label(message.text, systemImage: failed ? "exclamationmark.triangle.fill" : AgentTool.owning(name)?.icon ?? "wrench.and.screwdriver")
                 .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(failed ? Color.orange : Color.secondary)
                 .padding(.horizontal, 10).padding(.vertical, 5)
                 .background(Color(.systemGray6), in: Capsule())
                 .frame(maxWidth: .infinity, alignment: .leading)

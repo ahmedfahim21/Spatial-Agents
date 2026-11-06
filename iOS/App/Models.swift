@@ -37,7 +37,7 @@ struct ZGModel: Identifiable, Decodable, Hashable {
 
     @MainActor static func displayName(_ id: String?) -> String {
         let id = id ?? defaultId
-        return ModelCatalog.shared.models.first { $0.id == id }?.displayName ?? id
+        return ModelCatalog.shared.models.first { $0.id == id }?.displayName ?? (id == defaultId ? "Claude Haiku 5.5" : id)
     }
 }
 

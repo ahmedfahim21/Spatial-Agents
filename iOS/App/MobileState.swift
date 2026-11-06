@@ -58,6 +58,8 @@ final class MobileState {
     private(set) var phase: ConversationPhase = .idle
     private(set) var transcript = ""
     var conversations: [UUID: [ChatMessage]] = [:] { didSet { saveConversationsSoon() } }
+    /// What each tool call did (by the tool message's id), so later turns know what was done.
+    @ObservationIgnored private var toolNotes: [UUID: String] = [:]
     /// Orders placed in conversations, by the id of their `.order` message.
     private(set) var orders: [UUID: OrderCard] = [:] { didSet { saveConversationsSoon() } }
     @ObservationIgnored private var conversationSave: Task<Void, Never>?
@@ -162,7 +164,7 @@ final class MobileState {
         voices.primary = ServerVoice()
         voices.onStatus = { [weak self] s in self?.voiceStatus = s }
 
-        (conversations, orders) = ConversationStore.load()
+        (conversations, orders, toolNotes) = ConversationStore.load()
         if let saved = UserDefaults.standard.dictionary(forKey: "zones") as? [String: String] {
             zones = Dictionary(uniqueKeysWithValues: saved.compactMap { k, v in
                 guard let id = UUID(uuidString: k), let z = Zone(rawValue: v) else { return nil }
@@ -660,7 +662,9 @@ final class MobileState {
         let idle = phase == .listening && transcript.isEmpty
         if idle, let since = lookAwaySince, Date().timeIntervalSince(since) > 5 { endConversation(); return }
         if phase == .listening {
-            if !transcript.isEmpty, Date().timeIntervalSince(lastHeardAt) > 1.3 {
+            // A word or two and a pause ("Can you…") usually means you're still thinking.
+            let words = transcript.split(separator: " ").count
+            if !transcript.isEmpty, Date().timeIntervalSince(lastHeardAt) > (words <= 2 ? 2.6 : 1.3) {
                 finishUtterance()
             } else if transcript.isEmpty, Date().timeIntervalSince(listenStartedAt) > 40 {
                 endConversation()
@@ -680,7 +684,7 @@ final class MobileState {
         conversationSave = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(1))
             guard let self, !Task.isCancelled else { return }
-            ConversationStore.save(self.conversations, orders: self.orders)
+            ConversationStore.save(self.conversations, orders: self.orders, toolNotes: self.toolNotes)
         }
     }
 
@@ -833,10 +837,16 @@ final class MobileState {
 
         // Drop leading agent lines: the model wants the conversation to start with the user.
         var turns: [Backend.Turn] = []
+        var done: [String] = []
         for m in messages(for: id) {
             switch m.kind {
-            case .user: turns.append(Backend.Turn(role: "user", content: m.text))
-            case .agent: turns.append(Backend.Turn(role: "assistant", content: m.text))
+            case .user: turns.append(Backend.Turn(role: "user", content: m.text)); done = []
+            case .tool: if let note = toolNotes[m.id] { done.append(note) }
+            case .agent:
+                // What its tools did in that turn, so it doesn't redo (or doubt) them.
+                let record = done.isEmpty ? "" : " [Done on the phone: \(done.joined(separator: "; "))]"
+                turns.append(Backend.Turn(role: "assistant", content: m.text + record))
+                done = []
             case .order:
                 // So the agent knows what was already bought (and doesn't order it again).
                 if let card = orders[m.id], let last = turns.last, last.role == "assistant" {
@@ -860,15 +870,16 @@ final class MobileState {
                 var full = ""
                 // Each round may ask for tools; the last round offers none, so it has to answer.
                 for round in 0..<4 {
+                    let final = round == 3
                     let result = try await backend.chat(
-                        agentId: id, messages: history, tools: round < 3 ? allowed.map(\.rawValue) : [], client: client,
+                        agentId: id, messages: history, tools: allowed.map(\.rawValue), final: final, client: client,
                         onText: { piece in
                             DispatchQueue.main.async { MainActor.assumeIsolated { reply.add(piece) } }
                         }, onOrder: { update in
                             DispatchQueue.main.async { MainActor.assumeIsolated { self.orderUpdate(update, agentId: id) } }
                         })
                     full += result.text
-                    guard !result.toolCalls.isEmpty else { break }
+                    guard !result.toolCalls.isEmpty, !final else { break }
                     // Say "Let me check." now, while the tools run.
                     awaitingTools = true
                     if !result.text.isEmpty {
@@ -880,12 +891,25 @@ final class MobileState {
                     ])
                     for call in result.toolCalls {
                         print("Agentsphere: tool \(call.name) \(call.arguments)")
-                        insert(ChatMessage(.tool(name: call.name), AgentTool.activity(call.name)), before: placeholder.id, of: id)
-                        let output = await phoneTools.run(call, allowed: allowed)
+                        let chip = ChatMessage(.tool(name: call.name), AgentTool.activity(call.name))
+                        insert(chip, before: placeholder.id, of: id)
+                        let output = await phoneTools.run(call, allowed: allowed, timeout: 25)
+                        let failed = output.hasPrefix("{\"error\"")
+                        print("Agentsphere: tool \(call.name) -> \(output.prefix(300))")
+                        if failed {
+                            updateMessage(chip.id, of: id) { $0.kind = .tool(name: call.name + "!"); $0.text = AgentTool.failure(call.name) }
+                        }
+                        toolNotes[chip.id] = "\(call.name) \(call.arguments) → \(output.prefix(240))"
                         history.append(["role": "tool", "tool_call_id": call.id, "content": output])
                     }
                 }
                 awaitingTools = false
+                // Never leave you hanging in silence.
+                if full.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    let sorry = "Sorry, I couldn't finish that. Could you ask me again?"
+                    full = sorry
+                    DispatchQueue.main.async { MainActor.assumeIsolated { reply.add(sorry) } }
+                }
                 // Queued after every piece, so it runs once they've all been handled.
                 DispatchQueue.main.async { MainActor.assumeIsolated { reply.finish(empty: full.isEmpty) } }
             } catch {

@@ -196,11 +196,12 @@ final class Backend: @unchecked Sendable {
     /// Streams the agent's reply; `onText` gets each new piece, `onOrder` each update of an
     /// order the agent placed (shops only). `messages` are chat messages, including earlier
     /// tool calls and results; `tools` the tool groups this agent may use on the phone.
-    func chat(agentId: UUID, messages: [[String: Any]], tools: [String] = [], client: [String: String] = [:],
+    func chat(agentId: UUID, messages: [[String: Any]], tools: [String] = [], final: Bool = false, client: [String: String] = [:],
               onText: @escaping (String) -> Void,
               onOrder: @escaping (OrderUpdate) -> Void = { _ in }) async throws -> ChatResult {
         var body: [String: Any] = ["agent_id": agentId.uuidString, "messages": messages, "client": client]
         if !tools.isEmpty { body["tools"] = tools }
+        if final { body["final"] = true }
         let req = try await functionRequest("chat", body: body)
         let (bytes, response) = try await URLSession.shared.bytes(for: req)
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {

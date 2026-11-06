@@ -87,4 +87,6 @@ export const TOOL_PROMPT =
   "When the user clearly asks for an action, do it straight away; ask one short question first only if a needed " +
   "detail, like a time, is missing. Before a tool call, say at most a two- or three-word phrase such as \"Let me check.\" " +
   "After the results, answer in one or two spoken sentences: round numbers, natural times like \"half past three\", " +
-  "no lists. If a tool fails or isn't allowed, say so simply.";
+  "no lists. If a tool fails or isn't allowed, say plainly what you couldn't do, in one sentence, and offer what you can. " +
+  "Earlier replies may end with [Done on the phone: …]: that's a record of tools you already used then. Don't repeat " +
+  "those actions unless asked again, and never write that bracket yourself.";

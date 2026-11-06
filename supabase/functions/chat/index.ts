@@ -68,9 +68,11 @@ async function chatModels(): Promise<Map<string, ModelInfo>> {
 
 /// The request body for one model. Spoken replies need the answer quickly, so models that
 /// can switch their "thinking" off get it off, and others get room to think before answering.
-function completion(model: string, info: ModelInfo | undefined, messages: unknown[], tools: unknown[]) {
+function completion(model: string, info: ModelInfo | undefined, messages: unknown[], tools: unknown[], final = false) {
   const body: Record<string, unknown> = { model, stream: true, max_tokens: model === MODEL ? 400 : 1200, messages };
-  if (tools.length) body.tools = tools;
+  // The tools stay listed on the last round (earlier tool calls in the conversation need
+  // them), but it may not call any more.
+  if (tools.length) { body.tools = tools; if (final) body.tool_choice = "none"; }
   if (info?.params.includes("chat_template_kwargs")) body.chat_template_kwargs = { enable_thinking: false };
   return body;
 }
@@ -84,6 +86,8 @@ Deno.serve(async (req) => {
   const mark = (k: string) => (marks[k] = Math.round(performance.now() - t0));
   let body: {
     agent_id?: string;
+    /** The last round of a reply: answer now, no more tool calls. */
+    final?: boolean;
     messages?: RawTurn[];
     warm?: boolean;
     /** Tool groups the owner allowed for this agent on their phone (see tools.ts). */
@@ -133,7 +137,7 @@ Deno.serve(async (req) => {
     fetch(ROUTER, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify(completion(model, info, messages, tools)),
+      body: JSON.stringify(completion(model, info, messages, tools, body.final === true)),
     });
   let upstream: Response;
   const wanted = agent.model && agent.model !== MODEL ? agent.model : null;
@@ -207,8 +211,11 @@ Deno.serve(async (req) => {
               for (const tc of delta?.tool_calls ?? []) {
                 const c = (calls[tc.index ?? 0] ??= { id: "", name: "", args: "" });
                 if (tc.id) c.id = tc.id;
-                if (tc.function?.name) c.name += tc.function.name;
-                if (tc.function?.arguments) c.args += tc.function.arguments;
+                // Names arrive whole; some providers repeat the finished call at the end, so
+                // set rather than append, and let a repeated complete argument object replace.
+                if (tc.function?.name) c.name = tc.function.name;
+                const a = tc.function?.arguments;
+                if (a) c.args = isJSON(c.args) && a.trimStart().startsWith("{") ? a : c.args + a;
               }
             } catch { /* keep-alive or partial line */ }
           }
@@ -219,7 +226,7 @@ Deno.serve(async (req) => {
       if (held) send(`data: ${JSON.stringify({ text: held })}\n\n`);
       mark("done");
       const wanted = calls.filter((c) => c?.name).map((c, i) => ({
-        id: c.id || `call_${i}`, name: c.name, arguments: c.args || "{}",
+        id: c.id || `call_${i}`, name: c.name, arguments: firstJSON(c.args),
       }));
       if (wanted.length) {
         // The app runs these on the phone and asks again with the results.
@@ -279,6 +286,25 @@ function menu(items: Item[]): string {
     "Never write it otherwise: not for questions, maybes, or anything already ordered. Never invent items or prices. " +
     "Don't say the payment went through; the app tells them.",
   ].join("\n");
+}
+
+function isJSON(s: string): boolean {
+  if (!s.trim()) return false;
+  try { JSON.parse(s); return true; } catch { return false; }
+}
+
+/** The arguments as one JSON object (the first complete one if a provider doubled them). */
+function firstJSON(s: string): string {
+  if (isJSON(s)) return s;
+  let depth = 0, inString = false, escaped = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inString) { if (escaped) escaped = false; else if (ch === "\\") escaped = true; else if (ch === '"') inString = false; continue; }
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}" && --depth === 0) { const head = s.slice(s.indexOf("{"), i + 1); if (isJSON(head)) return head; break; }
+  }
+  return "{}";
 }
 
 /** Keeps only well-formed user, assistant (with any tool calls) and tool messages. */

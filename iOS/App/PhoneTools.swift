@@ -45,9 +45,9 @@ enum AgentTool: String, CaseIterable, Identifiable {
         }
     }
 
-    /// The tool group a function the model called belongs to.
+    /// The tool group a function the model called belongs to (a trailing "!" marks a failed call).
     static func owning(_ function: String) -> AgentTool? {
-        switch function {
+        switch function.hasSuffix("!") ? String(function.dropLast()) : function {
         case "calendar_events", "calendar_add_event": .calendar
         case "reminders_list", "reminders_add", "reminders_complete": .reminders
         case "health_summary": .health
@@ -55,6 +55,19 @@ enum AgentTool: String, CaseIterable, Identifiable {
         case "weather": .weather
         case "set_alarm", "set_timer": .timers
         default: nil
+        }
+    }
+
+    /// Shown in the conversation when a call didn't work.
+    static func failure(_ function: String) -> String {
+        switch owning(function) {
+        case .calendar: "Couldn't use your calendar"
+        case .reminders: "Couldn't use Reminders"
+        case .health: "Couldn't read Apple Health"
+        case .maps: "Couldn't search maps"
+        case .weather: "Couldn't get the weather"
+        case .timers: "Couldn't set it"
+        case nil: "That didn't work"
         }
     }
 
@@ -153,6 +166,20 @@ final class PhoneTools {
 
     init(location: @escaping () -> CLLocation?) {
         self.location = location
+    }
+
+    /// Runs a call, giving up after `timeout` (a permission sheet left open, a hung query).
+    func run(_ call: Call, allowed: Set<AgentTool>, timeout: TimeInterval) async -> String {
+        await withTaskGroup(of: String?.self) { group in
+            group.addTask { await self.run(call, allowed: allowed) }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(timeout))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first ?? Self.json(["error": "It took too long, so it was stopped."])
+        }
     }
 
     func run(_ call: Call, allowed: Set<AgentTool>) async -> String {
