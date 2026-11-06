@@ -474,25 +474,6 @@ struct PaymentsSection: View {
                         Spacer()
                         Text(identity.level).foregroundStyle(.secondary)
                     }
-                    ForEach($items) { $item in
-                        HStack(spacing: 10) {
-                            TextField("Cappuccino", text: $item.name)
-                            HStack(spacing: 2) {
-                                Text("$").foregroundStyle(.secondary)
-                                TextField("3.50", text: $item.price)
-                                    .keyboardType(.decimalPad)
-                                    .frame(width: 64)
-                                    .multilineTextAlignment(.trailing)
-                            }
-                        }
-                    }
-                    .onDelete { items.remove(atOffsets: $0) }
-                    Button {
-                        withAnimation(Motion.snappy) { items.append(CatalogDraft()) }
-                    } label: {
-                        Label("Add item", systemImage: "plus")
-                    }
-                    .disabled(items.count >= 30)
                 } else {
                     Button { verify() } label: {
                         HStack {
@@ -503,12 +484,31 @@ struct PaymentsSection: View {
                     }
                     .disabled(verifying)
                 }
+                ForEach($items) { $item in
+                    HStack(spacing: 10) {
+                        TextField("Cappuccino", text: $item.name)
+                        HStack(spacing: 2) {
+                            Text("$").foregroundStyle(.secondary)
+                            TextField("3.50", text: $item.price)
+                                .keyboardType(.decimalPad)
+                                .frame(width: 64)
+                                .multilineTextAlignment(.trailing)
+                        }
+                    }
+                }
+                .onDelete { items.remove(atOffsets: $0) }
+                Button {
+                    withAnimation(Motion.snappy) { items.append(CatalogDraft()) }
+                } label: {
+                    Label("Add item", systemImage: "plus")
+                }
+                .disabled(items.count >= 30)
             }
         } header: { Text("Payments") } footer: {
             if let problem {
                 Text(problem).foregroundStyle(.orange)
             } else if enabled, state.worldIdentity == nil {
-                Text("Shops are run by verified humans. Verify once with World ID and your agents get a blue badge.")
+                Text("Verify once with World ID and your agents get a blue badge showing a real human runs them. Visitors pay in USDC on Hedera.")
             } else if enabled {
                 Text("Visitors' wallets pay in USDC on Hedera. Your agent gets its own wallet, and knows the menu.")
             } else {

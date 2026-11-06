@@ -754,7 +754,7 @@ final class MobileState {
     func openShop(_ a: Agent, items: [CatalogItem]) async throws {
         _ = try await backend.saveCatalog(agentId: a.id, items: items)
         for i in myAgents.indices where myAgents[i].id == a.id { myAgents[i].pricing = "paid" }
-        for i in nearby.indices where nearby[i].id == a.id { nearby[i].pricing = "paid"; nearby[i].verified = true }
+        for i in nearby.indices where nearby[i].id == a.id { nearby[i].pricing = "paid"; nearby[i].verified = worldIdentity != nil }
     }
 
     /// An order update from a shop agent's reply: a card in the conversation, then the outcome spoken.

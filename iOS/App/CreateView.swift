@@ -184,7 +184,7 @@ struct CreateView: View {
     private var canSave: Bool {
         !name.trimmingCharacters(in: .whitespaces).isEmpty && !saving
             && (!state.createFlavor.needsPlace || place != nil || state.location.hasFix)
-            && (!selling || (state.worldIdentity != nil && !menu.isEmpty && catalog.allSatisfy { $0.isValid || $0.isBlank }))
+            && (!selling || (!menu.isEmpty && catalog.allSatisfy { $0.isValid || $0.isBlank }))
     }
 
     private var selling: Bool { state.createFlavor == .publicPlace && acceptsPayments }
