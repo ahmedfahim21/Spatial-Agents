@@ -26,7 +26,7 @@ struct ConversationScreen: View {
             }
             VStack(spacing: 6) {
                 BotView(agent: agent, mood: state.mood(for: agent), size: 64)
-                Text(agent.name).font(.headline)
+                AgentTitle(agent: agent)
                 PhaseLabel(phase: state.phase, failing: state.failing.contains(agent.id))
             }
         }
@@ -77,7 +77,13 @@ private struct MessageList: View {
         ScrollView {
             LazyVStack(spacing: 8) {
                 ForEach(messages) { m in
-                    MessageBubble(message: m)
+                    Group {
+                        if m.kind == .order, let card = state.orders[m.id] {
+                            OrderCardView(card: card, messageId: m.id, agentId: agent.id)
+                        } else {
+                            MessageBubble(message: m)
+                        }
+                    }
                         .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: m.kind == .user ? .bottomTrailing : .bottomLeading)),
                                                 removal: .opacity))
                 }

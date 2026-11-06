@@ -52,6 +52,13 @@ final class MobileState {
     private(set) var phase: ConversationPhase = .idle
     private(set) var transcript = ""
     var conversations: [UUID: [ChatMessage]] = [:]
+    /// Orders placed in conversations, by the id of their `.order` message.
+    private(set) var orders: [UUID: OrderCard] = [:]
+    /// Your World ID verification (a verified human), once you've done it.
+    private(set) var worldIdentity: WorldIdentity?
+    @ObservationIgnored private let worldAuth = WorldAuth()
+    /// The order card of each agent's reply in flight.
+    @ObservationIgnored private var liveOrder: [UUID: UUID] = [:]
 
     /// Where each body-anchored agent sits around you.
     private(set) var zones: [UUID: Zone] = [:]
@@ -196,6 +203,7 @@ final class MobileState {
         tracker.start()
         location.start()
         Task { await refreshMine() }
+        Task { await refreshIdentity() }
     }
 
     /// For onboarding: ask for motion access by starting AirPods head tracking.
@@ -681,11 +689,17 @@ final class MobileState {
         audio.ping(from: id, high: true)
 
         // Drop leading agent lines: the model wants the conversation to start with the user.
-        var turns = messages(for: id).compactMap { m -> Backend.Turn? in
+        var turns: [Backend.Turn] = []
+        for m in messages(for: id) {
             switch m.kind {
-            case .user: return Backend.Turn(role: "user", content: m.text)
-            case .agent: return Backend.Turn(role: "assistant", content: m.text)
-            default: return nil
+            case .user: turns.append(Backend.Turn(role: "user", content: m.text))
+            case .agent: turns.append(Backend.Turn(role: "assistant", content: m.text))
+            case .order:
+                // So the agent knows what was already bought (and doesn't order it again).
+                if let card = orders[m.id], let last = turns.last, last.role == "assistant" {
+                    turns[turns.count - 1] = Backend.Turn(role: "assistant", content: last.content + " (Order: \(card.title), \(Money.usd(card.amount)), \(card.outcome).)")
+                }
+            default: break
             }
         }
         while turns.first?.role == "assistant" { turns.removeFirst() }
@@ -695,9 +709,11 @@ final class MobileState {
         let reply = ReplySpeaker(state: self, agentId: id, messageId: placeholder.id)
         Task { @MainActor in
             do {
-                let full = try await backend.chat(agentId: id, turns: turns) { piece in
+                let full = try await backend.chat(agentId: id, turns: turns, onText: { piece in
                     DispatchQueue.main.async { MainActor.assumeIsolated { reply.add(piece) } }
-                }
+                }, onOrder: { update in
+                    DispatchQueue.main.async { MainActor.assumeIsolated { self.orderUpdate(update, agentId: id) } }
+                })
                 // Queued after every piece, so it runs once they've all been handled.
                 DispatchQueue.main.async { MainActor.assumeIsolated { reply.finish(empty: full.isEmpty) } }
             } catch {
@@ -708,6 +724,107 @@ final class MobileState {
                 self.audio.speak("Sorry, I couldn't answer that.", from: id, prelude: .error)
             }
         }
+    }
+
+    // MARK: - Payments
+
+    /// Shop agents your agents can buy from show a badge when their owner is a verified human.
+    func isVerified(_ a: Agent) -> Bool {
+        a.verified == true || (a.isPublic && worldIdentity != nil && myAgents.contains { $0.id == a.id })
+    }
+
+    func refreshIdentity() async {
+        guard Config.isConfigured, !offline else { return }
+        if let identity = try? await backend.worldIdentity() { worldIdentity = identity }
+    }
+
+    /// Verify you're a human with World ID (for running a shop). Updates badges when it works.
+    func verifyWithWorld() async -> WorldAuth.Outcome {
+        let outcome = await worldAuth.run(purpose: "verify_shop")
+        print("Agentsphere: World ID verify: \(outcome)")
+        if outcome == .ok {
+            await refreshIdentity()
+            haptics.arrived()
+            Task { await refreshNearby(force: true) }
+        }
+        return outcome
+    }
+
+    /// Turns one of your public agents into a shop with this menu.
+    func openShop(_ a: Agent, items: [CatalogItem]) async throws {
+        _ = try await backend.saveCatalog(agentId: a.id, items: items)
+        for i in myAgents.indices where myAgents[i].id == a.id { myAgents[i].pricing = "paid" }
+        for i in nearby.indices where nearby[i].id == a.id { nearby[i].pricing = "paid"; nearby[i].verified = true }
+    }
+
+    /// An order update from a shop agent's reply: a card in the conversation, then the outcome spoken.
+    private func orderUpdate(_ u: OrderUpdate, agentId: UUID) {
+        print("Agentsphere: order \(u.status) \(u.error ?? "")")
+        if let mid = liveOrder[agentId], orders[mid] != nil, u.status != "paying" {
+            orders[mid]?.apply(u)
+        } else if u.status == "paying" || liveOrder[agentId] == nil {
+            let m = ChatMessage(.order, u.itemName ?? "Order")
+            orders[m.id] = OrderCard(u)
+            post(m, to: agentId)
+            liveOrder[agentId] = m.id
+        }
+        guard u.status != "paying", let mid = liveOrder.removeValue(forKey: agentId), let card = orders[mid] else { return }
+        announce(card, agentId: agentId)
+    }
+
+    /// Approve a large purchase: a fresh World ID check, then the wallet pays.
+    func approveOrder(messageId: UUID, agentId: UUID) {
+        guard var card = orders[messageId], card.status == .needsApproval,
+              let approval = card.approvalId, let itemId = card.itemId else { return }
+        if phase == .listening { _ = speech.finish(); phase = .idle }
+        card.status = .approving
+        orders[messageId] = card
+        Task { @MainActor in
+            let outcome = await worldAuth.run(purpose: "checkpoint", approvalId: approval)
+            print("Agentsphere: World ID checkpoint: \(outcome)")
+            switch outcome {
+            case .ok:
+                orders[messageId]?.status = .paying
+                do {
+                    let update = try await backend.pay(agentId: agentId, itemId: itemId, qty: card.qty, approvalId: approval)
+                    orders[messageId]?.apply(update)
+                } catch {
+                    orders[messageId]?.status = .failed
+                    orders[messageId]?.detail = error.localizedDescription
+                }
+            case .cancelled:
+                orders[messageId]?.status = .cancelled
+                orders[messageId]?.detail = "You closed World ID before approving."
+            case .denied:
+                orders[messageId]?.status = .denied
+                orders[messageId]?.detail = "World ID didn't approve it."
+            case .failed(let why):
+                orders[messageId]?.status = .failed
+                orders[messageId]?.detail = why
+            }
+            if let done = orders[messageId] { announce(done, agentId: agentId) }
+        }
+    }
+
+    /// Says how an order went, in the shop agent's voice.
+    private func announce(_ card: OrderCard, agentId: UUID) {
+        let line: String
+        switch card.status {
+        case .paid:
+            haptics.arrived()
+            line = "Paid. \(card.title), \(Money.usd(card.amount))."
+        case .needsApproval:
+            line = "That's \(Money.usd(card.amount)), more than your wallet pays on its own. Approve it with World ID on your phone."
+        case .denied, .cancelled:
+            line = "No problem, nothing was paid."
+        case .failed:
+            line = "The payment didn't go through, so nothing was paid."
+        case .paying, .approving:
+            return
+        }
+        guard activeId == agentId else { return }
+        if phase != .speaking { phase = .speaking }
+        audio.speak(line, from: agentId, prelude: nil)
     }
 
     /// Called by ReplySpeaker as a streamed reply arrives.
