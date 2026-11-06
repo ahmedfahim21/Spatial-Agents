@@ -81,15 +81,26 @@ enum AgentTool: String, CaseIterable, Identifiable {
 }
 
 /// Which tools each agent may use, kept on this phone (it's about this phone's data).
-/// New personal agents get everything available.
+/// Stored as the ones you switched off, so a tool added later starts on.
 enum ToolAccess {
+    private static func offKey(_ id: UUID) -> String { "toolsOff.\(id.uuidString)" }
+
     static func tools(for id: UUID) -> Set<AgentTool> {
-        guard let saved = UserDefaults.standard.stringArray(forKey: "tools.\(id.uuidString)") else { return Set(AgentTool.available) }
-        return Set(saved.compactMap(AgentTool.init).filter(AgentTool.available.contains))
+        let d = UserDefaults.standard
+        if d.object(forKey: offKey(id)) == nil, let allowed = d.stringArray(forKey: "tools.\(id.uuidString)") {
+            // Saved as an allow-list by an earlier build, before Health existed: Health wasn't
+            // switched off, it just wasn't offered.
+            let off = AgentTool.allCases.filter { $0 != .health && !allowed.contains($0.rawValue) }.map(\.rawValue)
+            d.set(off, forKey: offKey(id))
+            d.removeObject(forKey: "tools.\(id.uuidString)")
+        }
+        let off = Set(d.stringArray(forKey: offKey(id)) ?? [])
+        return Set(AgentTool.available.filter { !off.contains($0.rawValue) })
     }
 
     static func set(_ tools: Set<AgentTool>, for id: UUID) {
-        UserDefaults.standard.set(tools.map(\.rawValue).sorted(), forKey: "tools.\(id.uuidString)")
+        let off = AgentTool.available.filter { !tools.contains($0) }.map(\.rawValue)
+        UserDefaults.standard.set(off, forKey: offKey(id))
     }
 }
 
