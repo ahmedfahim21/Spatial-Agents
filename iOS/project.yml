@@ -35,6 +35,12 @@ targets:
         NSHealthShareUsageDescription: Your agents can tell you about your steps, sleep, workouts and heart rate when you ask. Health data stays on your iPhone except for the answer to your question.
         NSHealthUpdateUsageDescription: Agentsphere doesn't write to Apple Health.
         NSAlarmKitUsageDescription: Your agents can set alarms and timers when you ask.
+        AgentsphereHealthKit: true
+    entitlements:
+      path: App/Agentsphere.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+        com.apple.developer.healthkit.access: []
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.abhisheksatpathy.agentsphere
