@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+/* The app's design language (iOS/App/Design.swift): light, native iOS. Ink is the accent;
+   colour belongs to the agents. Values are the iOS system colours the app renders with. */
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  --color-ink: #000000;
+  --color-grouped: #f2f2f7;
+  --color-card: #ffffff;
+  --color-fill: #e5e5ea;
+  --color-secondary: #6c6c70;
+  --color-separator: #c6c6c8;
+
+  --radius-card: 16px;
+
+  /* Motion.snappy: a critically damped spring, no overshoot. */
+  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-ink: #ffffff;
+    --color-grouped: #000000;
+    --color-card: #1c1c1e;
+    --color-fill: #2c2c2e;
+    --color-secondary: #98989f;
+    --color-separator: #38383a;
+  }
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 72px;
+}
+
+body {
+  background: var(--color-grouped);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Presses answer on touch-down: a slight scale, fast ease-out. */
+.pressable {
+  transition:
+    transform 160ms ease-out,
+    opacity 160ms ease-out;
+}
+.pressable:active {
+  transform: scale(0.97);
+  opacity: 0.85;
+  transition-duration: 100ms;
+}
+
+@keyframes nod {
+  30% { transform: translateY(7px); }
+  65% { transform: translateY(-3px); }
+}
+@keyframes shake {
+  20% { transform: translateX(-8px); }
+  50% { transform: translateX(8px); }
+  80% { transform: translateX(-4px); }
+}
+.animate-nod { animation: nod 520ms ease-in-out; }
+.animate-shake { animation: shake 520ms ease-in-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .animate-nod, .animate-shake { animation: none; }
+}
