@@ -39,13 +39,13 @@ pnpm dev
 
 `pnpm build` typechecks and builds to `web/dist`.
 
-The turning AirPods are frames rendered from `web/public/airpods_prod_3.usdz`:
+The turning AirPods are frames in `web/public/airpods/`, rendered from a USDZ model that isn't in this repo:
 
 ```bash
-swift scripts/render-airpods.swift web/public/airpods_prod_3.usdz web/public/airpods 25 800
+swift scripts/render-airpods.swift <model.usdz> web/public/airpods 25 800
 ```
 
-That model and the frames in `web/public/airpods/` are © Apple Inc. and aren't covered by this repo's MIT license.
+Those frames are derived from an Apple Inc. model and aren't covered by this repo's MIT license.
 
 ## Paying shop agents: x402 on Hedera
 
