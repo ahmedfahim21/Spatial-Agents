@@ -36,6 +36,7 @@
 		CD6D387AF35D4BDEE9693852 /* FindView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E864C79FC8DB3608130090D1 /* FindView.swift */; };
 		D29AA90A3E710CC3F1D20A80 /* SharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD2856D24BAF26F6DBFE7524 /* SharedModels.swift */; };
 		EB2DBF1AFFADA94ACB3C5DD4 /* Voices.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5EEEDAAAF5FE57E1D86DDDE /* Voices.swift */; };
+		FBE98FEDC79DCAF5A102312A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2AC38C1D24165F854536FE58 /* Assets.xcassets */; };
 		FEAA581B15E5279728FC6D9A /* Haptics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D6559DE46AF8B2FBED0ADAF /* Haptics.swift */; };
 /* End PBXBuildFile section */
 
@@ -46,6 +47,7 @@
 		21F270FF6631D57EC3A4C7D4 /* Backend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Backend.swift; sourceTree = "<group>"; };
 		24455A322521E16DC888C5AE /* CreateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateView.swift; sourceTree = "<group>"; };
 		294E3BAC9F7EFFDF2A41E375 /* SpaceStage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpaceStage.swift; sourceTree = "<group>"; };
+		2AC38C1D24165F854536FE58 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		2BB318E4F929F2C2DC23056E /* PositionFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PositionFilter.swift; sourceTree = "<group>"; };
 		3152B5494B1B57B6F4E97B9E /* Bot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Bot.swift; sourceTree = "<group>"; };
 		3431B5C1813404767B7B3E06 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -129,6 +131,7 @@
 				F85A612CB15D021880EC1BFE /* Agent.swift */,
 				5081E6D7378687E27AC8000F /* AgentDetailView.swift */,
 				21E5A9B40DF845E88482B02B /* AgentsphereMobileApp.swift */,
+				2AC38C1D24165F854536FE58 /* Assets.xcassets */,
 				21F270FF6631D57EC3A4C7D4 /* Backend.swift */,
 				3152B5494B1B57B6F4E97B9E /* Bot.swift */,
 				6B42CE28424418C4C9ADB2EF /* Config.swift */,
@@ -170,6 +173,7 @@
 			buildConfigurationList = 35E9A13E1C61FB0CC31A5803 /* Build configuration list for PBXNativeTarget "Agentsphere" */;
 			buildPhases = (
 				5ECBB862382642CE3C243959 /* Sources */,
+				87568B9563696342004D0132 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -215,6 +219,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		87568B9563696342004D0132 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FBE98FEDC79DCAF5A102312A /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		5ECBB862382642CE3C243959 /* Sources */ = {
