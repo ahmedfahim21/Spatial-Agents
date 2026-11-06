@@ -110,6 +110,45 @@ final class Backend: @unchecked Sendable {
         return created
     }
 
+    /// Fields you can change on an agent you own.
+    struct AgentChanges: Encodable {
+        var name: String
+        var color: String?
+        var shape: String?
+        var voiceId: String?
+        var greeting: String
+        var context: String
+        var lat: Double?
+        var lng: Double?
+        var radiusM: Double
+    }
+
+    func update(_ id: UUID, _ changes: AgentChanges) async throws -> Agent {
+        let data = try await rest("agents?id=eq.\(id.uuidString)", method: "PATCH", body: try encoder.encode(changes),
+                                  prefer: "return=representation")
+        guard let updated = try decoder.decode([Agent].self, from: data).first else {
+            throw BackendError(message: "The agent wasn't saved")
+        }
+        return updated
+    }
+
+    /// A shop's recent sales (only its owner can read them).
+    func sales(agentId: UUID) async throws -> [Sale] {
+        let data = try await rest("orders?select=id,item_name,qty,amount_usdc,hedera_tx,checkpoint,created_at&agent_id=eq.\(agentId.uuidString)&order=created_at.desc&limit=20",
+                                  method: "GET")
+        return try decoder.decode([Sale].self, from: data)
+    }
+
+    /// USDC held by a Hedera account, from the public mirror node (a few seconds behind).
+    func usdcBalance(account: String) async -> Double? {
+        guard let url = URL(string: "https://testnet.mirrornode.hedera.com/api/v1/accounts/\(account)/tokens?token.id=0.0.429274"),
+              let (data, _) = try? await URLSession.shared.data(from: url),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tokens = obj["tokens"] as? [[String: Any]] else { return nil }
+        let units = (tokens.first?["balance"] as? NSNumber)?.doubleValue ?? 0
+        return units / 1_000_000
+    }
+
     func delete(_ id: UUID) async throws {
         _ = try await rest("agents?id=eq.\(id.uuidString)", method: "DELETE")
     }

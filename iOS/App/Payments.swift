@@ -107,6 +107,25 @@ struct OrderCard: Equatable {
     }
 }
 
+/// A settled sale, as the shop's owner sees it.
+struct Sale: Decodable, Identifiable {
+    let id: UUID
+    let itemName: String
+    let qty: Int
+    let amountUsdc: Double
+    let hederaTx: String
+    let checkpoint: Bool
+    let createdAt: String
+
+    var date: Date? { WorldLevel.date(createdAt) }
+    var receiptURL: URL? {
+        // "0.0.123@1700000000.000000001" → HashScan's "0.0.123-1700000000-000000001".
+        let parts = hederaTx.split(separator: "@")
+        guard parts.count == 2 else { return nil }
+        return URL(string: "https://hashscan.io/testnet/transaction/\(parts[0])-\(parts[1].replacingOccurrences(of: ".", with: "-"))")
+    }
+}
+
 struct WalletInfo: Decodable {
     let accountId: String?
     let accountUrl: String?
@@ -441,6 +460,16 @@ struct CatalogDraft: Identifiable, Equatable {
     let id = UUID()
     var name = ""
     var price = ""
+    /// The saved item this row edits (nil = new).
+    var itemId: UUID?
+
+    init() {}
+
+    init(_ item: CatalogItem) {
+        name = item.name
+        price = String(format: "%.2f", item.priceUsdc)
+        itemId = item.id
+    }
 
     var priceValue: Double? {
         Double(price.replacingOccurrences(of: ",", with: ".").replacingOccurrences(of: "$", with: ""))
@@ -451,7 +480,7 @@ struct CatalogDraft: Identifiable, Equatable {
     var isBlank: Bool { name.trimmingCharacters(in: .whitespaces).isEmpty && price.isEmpty }
     var item: CatalogItem? {
         guard isValid, let p = priceValue else { return nil }
-        return CatalogItem(name: name.trimmingCharacters(in: .whitespaces), priceUsdc: (p * 100).rounded() / 100)
+        return CatalogItem(id: itemId, name: name.trimmingCharacters(in: .whitespaces), priceUsdc: (p * 100).rounded() / 100)
     }
 }
 
