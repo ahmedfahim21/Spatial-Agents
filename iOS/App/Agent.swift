@@ -11,6 +11,8 @@ struct Agent: Identifiable, Codable, Hashable {
     var name: String
     var emoji: String?
     var color: String?
+    /// Body shape (circle, hexagon, squircle, capsule, drop); see `botShape`.
+    var shape: String?
     var voiceId: String?
     var greeting: String
     /// Only present for agents you own; public discovery never returns it.
@@ -30,8 +32,7 @@ struct Agent: Identifiable, Codable, Hashable {
 
     var isGeo: Bool { anchor == .geo || (anchor == nil && lat != nil) }
     var isPublic: Bool { visibility == .public }
-    var tint: Color { Color(hex: color) ?? .cyan }
-    var symbol: String { emoji?.isEmpty == false ? emoji! : String(name.prefix(1)).uppercased() }
+    var tint: Color { botColor.color }
     var voiceIndex: Int { VoicePalette.index(of: voiceId) }
 }
 
@@ -43,6 +44,7 @@ struct NewAgent: Encodable {
     var name: String
     var emoji: String?
     var color: String?
+    var shape: String?
     var voiceId: String?
     var greeting: String
     var context: String
@@ -76,6 +78,4 @@ extension Color {
         guard s.count == 6, let v = UInt32(s, radix: 16) else { return nil }
         self.init(red: Double((v >> 16) & 0xFF) / 255, green: Double((v >> 8) & 0xFF) / 255, blue: Double(v & 0xFF) / 255)
     }
-
-    static let agentPalette = ["#36D1DC", "#FF8A5B", "#A78BFA", "#4ADE80", "#F472B6", "#FACC15", "#60A5FA", "#F87171"]
 }

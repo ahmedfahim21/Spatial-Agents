@@ -89,8 +89,16 @@ final class Backend: @unchecked Sendable {
     }
 
     func create(_ agent: NewAgent) async throws -> Agent {
-        let body = try encoder.encode(agent)
-        let data = try await rest("agents", method: "POST", body: body, prefer: "return=representation")
+        let data: Data
+        do {
+            data = try await rest("agents", method: "POST", body: try encoder.encode(agent), prefer: "return=representation")
+        } catch let error as BackendError where error.message.contains("'shape'") && agent.shape != nil {
+            // The database predates agent shapes (migration 20261106120000 not applied yet):
+            // save without it; the app derives a stable shape from the id.
+            var plain = agent
+            plain.shape = nil
+            data = try await rest("agents", method: "POST", body: try encoder.encode(plain), prefer: "return=representation")
+        }
         guard let created = try decoder.decode([Agent].self, from: data).first else {
             throw BackendError(message: "The agent wasn't saved")
         }

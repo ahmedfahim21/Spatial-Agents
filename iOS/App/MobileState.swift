@@ -1,6 +1,6 @@
 import AVFoundation
-import Combine
 import CoreLocation
+import Observation
 import SwiftUI
 
 enum ConversationPhase: Equatable {
@@ -11,9 +11,8 @@ enum ConversationPhase: Equatable {
 /// - body-anchored agents sit in a ring around you and travel with you (BodyFollower frame);
 /// - geo-anchored agents sit where they are in the world (compass frame), once you've arrived.
 /// Look at one for 3 seconds and it wakes up; then you talk hands-free.
-@MainActor
-final class MobileState: ObservableObject {
-    let head = HeadMotion()
+@Observable @MainActor
+final class MobileState {
     let voices = VoiceRouter()
     let audio: SpatialAudio
     let speech = SpeechInput()
@@ -22,50 +21,57 @@ final class MobileState: ObservableObject {
     private let tracker = HeadTracker()
     private let backend = Backend.shared
 
-    // MARK: Published state
+    // MARK: State the UI reads
 
-    @Published var myAgents: [Agent] = []
-    @Published var nearby: [Agent] = []
-    @Published var backendStatus = ""
-    @Published var loading = false
+    var myAgents: [Agent] = []
+    var nearby: [Agent] = []
+    var backendStatus = ""
+    var loading = false
 
     /// Body-anchored agents are around you.
-    @Published var withMe = true { didSet { syncPlacement() } }
-    @Published var findTargetId: UUID? { didSet { if oldValue != findTargetId { findTargetChanged() } } }
-    @Published private(set) var arrived: Set<UUID> = []
+    var withMe = true { didSet { syncPlacement() } }
+    var findTargetId: UUID? { didSet { if oldValue != findTargetId { findTargetChanged() } } }
+    private(set) var arrived: Set<UUID> = []
 
-    @Published private(set) var focusedId: UUID?
-    var stareProgress: Double {
-        get { head.stare }
-        set { if head.stare != newValue { head.stare = newValue } }
-    }
+    private(set) var focusedId: UUID?
+    /// 0…1 while you hold your gaze on the focused agent.
+    private(set) var stareProgress: Double = 0
+    /// Head direction: yaw relative to your body (+ = right) and raw pitch, degrees.
+    private(set) var headYaw: Double = 0
+    private(set) var headPitchRaw: Double = 0
+    /// Agents whose conversation just ended (eyes closed) or failed (worried).
+    private(set) var asleep: Set<UUID> = []
+    private(set) var failing: Set<UUID> = []
     /// Which tab is showing. Looking at agents only does anything on the screens that show them.
     enum Screen { case explore, withMe, create, settings }
-    @Published var screen: Screen = .explore { didSet { if oldValue != screen { updateFocus() } } }
+    var screen: Screen = .explore { didSet { if oldValue != screen { updateFocus() } } }
     private var lookingEnabled: Bool { screen == .explore || screen == .withMe }
-    @Published private(set) var activeId: UUID?
-    @Published private(set) var phase: ConversationPhase = .idle
-    @Published private(set) var transcript = ""
-    @Published var conversations: [UUID: [ChatMessage]] = [:]
+    private(set) var activeId: UUID?
+    private(set) var phase: ConversationPhase = .idle
+    private(set) var transcript = ""
+    var conversations: [UUID: [ChatMessage]] = [:]
 
     /// Where each body-anchored agent sits around you.
-    @Published private(set) var zones: [UUID: Zone] = [:]
+    private(set) var zones: [UUID: Zone] = [:]
     /// The user has set their forward direction and arranged their agents.
-    @Published private(set) var calibrated = UserDefaults.standard.bool(forKey: "calibrated")
+    private(set) var calibrated = UserDefaults.standard.bool(forKey: "calibrated")
     /// Head pitch when looking straight ahead (AirPods sit differently on everyone).
-    @Published private(set) var pitchZero = UserDefaults.standard.double(forKey: "pitchZero")
+    private(set) var pitchZero = UserDefaults.standard.double(forKey: "pitchZero")
     /// Head pitch relative to straight ahead.
-    var headPitch: Double { head.pitch - pitchZero }
+    var headPitch: Double { headPitchRaw - pitchZero }
+
+    /// The kind of agent Create starts with (other screens can preset it).
+    var createFlavor: AgentFlavor = .withMe
 
     /// While arranging agents, looking at one shouldn't wake it.
-    @Published var arranging = false
+    var arranging = false
 
-    @Published var trackingStatus = "Starting…"
-    @Published private(set) var hasHeadData = false
-    @Published var lastGesture: HeadGesture?
-    @Published var route = ""
-    @Published var highQualityMic = false
-    @Published var voiceStatus = ""
+    var trackingStatus = "Starting…"
+    private(set) var hasHeadData = false
+    var lastGesture: HeadGesture?
+    var route = ""
+    var highQualityMic = false
+    var voiceStatus = ""
 
     // MARK: Head frames
 
@@ -75,8 +81,8 @@ final class MobileState: ObservableObject {
     private var yawFixed: Double = 0
     /// Compass heading of the tracker's fixed-frame zero; nil until calibrated.
     private var worldOffset: Double?
-    private var lastHeadAt = Date.distantPast
-    private var lastYawLog = Date.distantPast
+    @ObservationIgnored private var lastHeadAt = Date.distantPast
+    @ObservationIgnored private var lastYawLog = Date.distantPast
 
     /// Where your head points in the world, degrees from true north.
     var headWorld: Double? {
@@ -86,24 +92,26 @@ final class MobileState: ObservableObject {
 
     // MARK: Placement
 
-    private var placed: Set<UUID> = []
+    @ObservationIgnored private var placed: Set<UUID> = []
     /// Body agents' fixed slots around you.
     private var bodySlots: [UUID: Zone] = [:]
     /// Geo agents' bearings, frozen when close or when GPS is poor so they don't jitter.
     private var lockedBearing: [UUID: Double] = [:]
-    private var lastFocusAt = Date()
-    private var lookAwaySince: Date?
-    private var lastHeardAt = Date()
-    private var listenStartedAt = Date()
-    private var lastBeacon = Date.distantPast
-    private var lastWarmUp = Date.distantPast
-    private var lastThinkingPulse = Date.distantPast
-    private var lastNearbyFetch: (at: Date, where: CLLocationCoordinate2D)?
-    private var timer: Timer?
-    private var bag: Set<AnyCancellable> = []
+    @ObservationIgnored private var lastFocusAt = Date()
+    @ObservationIgnored private var lookAwaySince: Date?
+    @ObservationIgnored private var lastHeardAt = Date()
+    @ObservationIgnored private var listenStartedAt = Date()
+    @ObservationIgnored private var lastBeacon = Date.distantPast
+    @ObservationIgnored private var lastWarmUp = Date.distantPast
+    @ObservationIgnored private var lastThinkingPulse = Date.distantPast
+    @ObservationIgnored private var lastNearbyFetch: (at: Date, where: CLLocationCoordinate2D)?
+    @ObservationIgnored private var timer: Timer?
+    @ObservationIgnored private var started = false
 
     init() {
-        AudioSession.configure()
+        // Play only until start(): a recording session would ask for the mic before
+        // onboarding has explained why.
+        AudioSession.configurePlaybackOnly()
         audio = SpatialAudio(voices: voices)
         audio.headYaw = 0   // positions are computed here, already head-relative
         voices.primary = ServerVoice()
@@ -125,7 +133,7 @@ final class MobileState: ObservableObject {
         tracker.onYaw = { [weak self] y in
             guard let self else { return }
             self.yawBody = y
-            self.head.yaw = y
+            self.headYaw = y
             self.lastHeadAt = Date()
             if !self.hasHeadData {
                 self.hasHeadData = true
@@ -133,30 +141,23 @@ final class MobileState: ObservableObject {
             }
             if Date().timeIntervalSince(self.lastYawLog) > 2 {
                 self.lastYawLog = Date()
-                print(String(format: "Agentsphere: head yaw %.0f° (fixed %.0f°) pitch %.0f°", y, self.yawFixed, self.head.pitch))
+                print(String(format: "Agentsphere: head yaw %.0f° (fixed %.0f°) pitch %.0f°", y, self.yawFixed, self.headPitchRaw))
             }
             self.updateScene()
         }
         tracker.onFixedYaw = { [weak self] y in self?.yawFixed = y }
-        tracker.onPitch = { [weak self] p in self?.head.pitch = p }
+        tracker.onPitch = { [weak self] p in self?.headPitchRaw = p }
         tracker.onGesture = { [weak self] g in self?.handleGesture(g) }
         tracker.isEngaged = { [weak self] in
             guard let self else { return false }
             return self.activeId != nil && self.phase != .idle
         }
-        tracker.start()
-
         speech.onPartial = { [weak self] t in self?.heard(t) }
         audio.onSpeakingChanged = { [weak self] speaking in self?.speakingChanged(speaking) }
         audio.beforeSpeaking = { [weak self] in self?.releaseMicForSpeech() ?? false }
 
-        location.start()
-        location.$coordinate.sink { [weak self] _ in
-            Task { @MainActor in self?.locationChanged() }
-        }.store(in: &bag)
-        location.$heading.sink { [weak self] _ in
-            Task { @MainActor in self?.calibrateWorld(); self?.updateScene() }
-        }.store(in: &bag)
+        location.onMove = { [weak self] in self?.locationChanged() }
+        location.onHeading = { [weak self] in self?.calibrateWorld(); self?.updateScene() }
 
         let t = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
@@ -165,7 +166,47 @@ final class MobileState: ObservableObject {
         timer = t
 
         refreshRoute()
+    }
+
+    /// Starts sensors and loads agents. Called once onboarding is done, so permission
+    /// prompts appear in context rather than all at once on first launch.
+    func start() {
+        guard !started else { return }
+        started = true
+        AudioSession.configure()
+        refreshRoute()
+        tracker.start()
+        location.start()
         Task { await refreshMine() }
+    }
+
+    /// For onboarding: ask for motion access by starting AirPods head tracking.
+    func startHeadTracking() { tracker.start() }
+
+    // MARK: - Faces
+
+    /// How an agent's face should look right now.
+    func mood(for a: Agent) -> BotMood {
+        if failing.contains(a.id) { return .error }
+        if activeId == a.id {
+            switch phase {
+            case .greeting: return .awake
+            case .speaking: return .speaking
+            case .listening: return .listening
+            case .thinking: return .thinking
+            case .idle: return .awake
+            }
+        }
+        if focusedId == a.id { return .focused }
+        if asleep.contains(a.id) { return .ended }
+        if arrived.contains(a.id) { return .arrived }
+        return .idle
+    }
+
+    /// Where an agent's eyes should look so they face you (-1 left … 1 right).
+    func look(for a: Agent) -> Double {
+        guard let rel = relativeAngle(a.id) else { return 0 }
+        return -max(-1, min(1, sin(rel * .pi / 180)))
     }
 
     // MARK: - Agents
@@ -177,8 +218,11 @@ final class MobileState: ObservableObject {
         return myAgents.first { $0.id == id } ?? nearby.first { $0.id == id }
     }
 
+    /// Sample data only (UI previews): never talk to the server.
+    @ObservationIgnored var offline = false
+
     func refreshMine() async {
-        guard Config.isConfigured else { return }
+        guard Config.isConfigured, !offline else { return }
         do {
             myAgents = try await backend.myAgents()
             backendStatus = ""
@@ -191,7 +235,7 @@ final class MobileState: ObservableObject {
     }
 
     func refreshNearby(force: Bool = false) async {
-        guard Config.isConfigured, let here = location.coordinate else { return }
+        guard Config.isConfigured, !offline, let here = location.coordinate else { return }
         if !force, let last = lastNearbyFetch,
            Date().timeIntervalSince(last.at) < 30, GeoMath.distance(last.where, here) < 25 { return }
         lastNearbyFetch = (Date(), here)
@@ -323,7 +367,7 @@ final class MobileState: ObservableObject {
         guard hasHeadData, let h = location.heading, location.headingAccuracy < 30 else { return }
         let target = normalize360(h - yawFixed)
         guard let current = worldOffset else { worldOffset = target; return }
-        let lookingAtPhone = head.pitch < -12
+        let lookingAtPhone = headPitchRaw < -12
         let alpha = lookingAtPhone ? 0.08 : 0.005   // slow drift correction otherwise
         worldOffset = normalize360(current + normalizeAngle(target - current) * alpha)
     }
@@ -396,7 +440,7 @@ final class MobileState: ObservableObject {
     /// "This is forward": the current head direction becomes the front of your space.
     func calibrateForward() {
         tracker.recenter()
-        pitchZero = head.pitch
+        pitchZero = headPitchRaw
         UserDefaults.standard.set(pitchZero, forKey: "pitchZero")
         worldOffset = nil
         calibrateWorld()
@@ -446,7 +490,10 @@ final class MobileState: ObservableObject {
         // Body agents: how far your gaze is from them, sideways and up/down.
         // Geo agents: sideways only (you're often looking down at the phone while finding).
         // On Create or Settings, your gaze is on the phone: no pings, no waking agents.
-        let pool = lookingEnabled ? talkable : talkable.filter { $0.id == activeId }
+        // Body agents need AirPods: without head tracking there's no gaze, and the agent in
+        // front would wake on its own.
+        let pool = (lookingEnabled ? talkable : talkable.filter { $0.id == activeId })
+            .filter { hasHeadData || $0.isGeo }
         let candidates = pool.compactMap { a -> (UUID, Double)? in
             guard let az = relativeAngle(a.id) else { return nil }
             guard let el = relativeElevation(a.id) else { return (a.id, abs(az)) }
@@ -527,6 +574,8 @@ final class MobileState: ObservableObject {
         activeId = a.id
         stareProgress = 0
         lookAwaySince = nil
+        asleep.remove(a.id)
+        failing.remove(a.id)
         ensurePlaced(a)
         haptics.tap(intensity: 0.9, sharpness: 0.5)
         let firstTime = messages(for: a.id).isEmpty
@@ -539,6 +588,14 @@ final class MobileState: ObservableObject {
     func endConversation() {
         if isListeningNow { _ = speech.finish() }
         if !speech.keepsInputOpen { speech.shutdown() }
+        if let id = activeId {
+            asleep.insert(id)
+            // Asleep for a while, then back to normal.
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(8))
+                if self?.activeId != id { self?.asleep.remove(id) }
+            }
+        }
         activeId = nil
         phase = .idle
         transcript = ""
@@ -593,6 +650,7 @@ final class MobileState: ObservableObject {
         _ = speech.finish()
         transcript = ""
         post(ChatMessage(.user, text), to: id)
+        failing.remove(id)
         phase = .thinking
         audio.ping(from: id, high: true)
 
@@ -619,6 +677,7 @@ final class MobileState: ObservableObject {
             } catch {
                 print("Agentsphere: reply failed: \(error.localizedDescription)")
                 self.updateMessage(placeholder.id, of: id) { $0.kind = .error; $0.text = error.localizedDescription }
+                self.failing.insert(id)
                 self.phase = .speaking
                 self.audio.speak("Sorry, I couldn't answer that.", from: id, prelude: .error)
             }
@@ -682,6 +741,17 @@ final class MobileState: ObservableObject {
         calibrateWorld()
     }
 
+    /// Short name of where sound is going ("AirPods Pro").
+    var routeName: String {
+        AVAudioSession.sharedInstance().currentRoute.outputs.first?.portName ?? "Headphones"
+    }
+
+    /// Back to listening after a pause (the mic button in a conversation).
+    func resumeListening() {
+        guard activeId != nil, phase == .idle else { return }
+        startListening()
+    }
+
     func refreshRoute() {
         route = AudioSession.routeDescription
         highQualityMic = AudioSession.highQualityMic
@@ -740,3 +810,75 @@ func normalize360(_ a: Double) -> Double {
     let x = a.truncatingRemainder(dividingBy: 360)
     return x < 0 ? x + 360 : x
 }
+
+#if DEBUG
+// MARK: - Sample world (debug builds only)
+
+/// Launch with `-sample YES` to fill the app with the design's example agents, offline,
+/// for checking screens in the simulator. `-scene find|arrived|talk|focus` sets a moment.
+extension MobileState {
+    func loadSampleWorld(scene: String?) {
+        offline = true
+        let here = CLLocationCoordinate2D(latitude: 19.0760, longitude: 72.8777)
+        func agent(_ name: String, _ color: BotColor, _ shape: BotShape, greeting: String = "",
+                   metres: Double? = nil, bearing: Double = 0, pricing: String = "free", mine: Bool = false,
+                   isPublic: Bool = true) -> Agent {
+            let spot = metres.map { GeoMath.offset(here, metres: $0, bearing: bearing) }
+            return Agent(id: UUID(), name: name, emoji: nil, color: color.hex, shape: shape.rawValue, voiceId: nil,
+                         greeting: greeting, context: nil, kind: isPublic ? .public : .personal,
+                         anchor: metres == nil ? .body : .geo, visibility: isPublic ? .public : .private,
+                         lat: spot?.latitude, lng: spot?.longitude, radiusM: 20, pricing: pricing,
+                         priceUsd: nil, walletAddress: nil, isMine: mine, distanceM: metres)
+        }
+        let helpDesk = agent("Hack Help Desk", .cyan, .circle,
+                             greeting: "Hey, I'm the help desk for the hackathon. Ask me about Wi-Fi, mentors, food or the schedule.",
+                             metres: 8, bearing: 20)
+        nearby = [
+            helpDesk,
+            agent("Museum Guide · Hall B", .violet, .squircle, metres: 62, bearing: 45),
+            agent("Where I parked", .orange, .hexagon, metres: 200, bearing: 300, mine: true, isPublic: false),
+            agent("Sponsor Booth 4", .pink, .drop, metres: 280, bearing: 120),
+            agent("Corner Café Barista", .green, .capsule, metres: 1200, bearing: 250, pricing: "paid"),
+        ]
+        myAgents = [
+            agent("Daily Planner", .blue, .hexagon, greeting: "Morning. Want the plan for today?"),
+            agent("Notes", .yellow, .squircle, greeting: "What should I jot down?"),
+            agent("Pitch Coach", .green, .drop, greeting: "Run me through your demo."),
+        ]
+        location.simulated = here
+        syncPlacement()
+        updateArrivals()
+        switch UserDefaults.standard.string(forKey: "tab") {
+        case "with": screen = .withMe
+        case "create": screen = .create
+        case "settings": screen = .settings
+        default: break
+        }
+
+        switch scene {
+        case "focus":
+            hasHeadData = true
+            focusedId = myAgents[0].id
+            stareProgress = 0.6
+        case "talk":
+            activeId = helpDesk.id
+            phase = .listening
+            conversations[helpDesk.id] = [
+                ChatMessage(.agent, helpDesk.greeting),
+                ChatMessage(.user, "Where do I find a mentor for the AI track?"),
+                ChatMessage(.agent, "Table 6, beside the stage. Office hours run until 4 pm."),
+                ChatMessage(.user, "And the Wi-Fi password?"),
+                ChatMessage(.agent, "Network is HackHall. The password is on the back of your badge."),
+            ]
+            transcript = "what time does judging…"
+            lastHeardAt = .distantFuture   // keep it on screen rather than sending
+        default:
+            break
+        }
+    }
+
+    /// The sample agent a `-scene` should open in Find.
+    var sampleFindTarget: UUID? { nearby.first { $0.name.hasPrefix(sampleScene == "arrived" ? "Hack" : "Museum") }?.id }
+    var sampleScene: String? { UserDefaults.standard.string(forKey: "scene") }
+}
+#endif

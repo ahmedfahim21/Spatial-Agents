@@ -19,6 +19,14 @@ enum AudioSession {
         print("Agentsphere: audio route \(routeDescription), high-quality mic: \(highQualityMic)")
     }
 
+    /// Playback only, for before the user has been asked about the microphone: activating a
+    /// recording session would pop the mic prompt with no context.
+    static func configurePlaybackOnly() {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .default)
+        try? session.setActive(true)
+    }
+
     /// Full-bandwidth AirPods audio is active, so the mic can stay open without going mono.
     static var highQualityMic: Bool {
         AVAudioSession.sharedInstance().currentRoute.inputs.contains { $0.bluetoothMicrophoneExtension?.highQualityRecording.isEnabled == true }
@@ -42,6 +50,7 @@ enum AudioSession {
     }
     #else
     static func configure() {}
+    static func configurePlaybackOnly() {}
     static var highQualityMic: Bool { false }
     #endif
 }

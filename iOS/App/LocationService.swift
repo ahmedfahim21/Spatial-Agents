@@ -1,25 +1,28 @@
-import Combine
 import CoreLocation
 import Foundation
+import Observation
 
 /// GPS position and compass heading, or a simulated position in demo mode.
-@MainActor
-final class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
-    @Published private(set) var coordinate: CLLocationCoordinate2D?
+@Observable @MainActor
+final class LocationService: NSObject, CLLocationManagerDelegate {
+    private(set) var coordinate: CLLocationCoordinate2D? { didSet { onMove?() } }
     /// Horizontal accuracy in metres (smaller is better).
-    @Published private(set) var accuracy: Double = .infinity
+    private(set) var accuracy: Double = .infinity
     /// Phone heading, degrees from true north.
-    @Published private(set) var heading: Double?
-    @Published private(set) var headingAccuracy: Double = .infinity
-    @Published private(set) var authorization: CLAuthorizationStatus = .notDetermined
+    private(set) var heading: Double? { didSet { onHeading?() } }
+    private(set) var headingAccuracy: Double = .infinity
+    private(set) var authorization: CLAuthorizationStatus = .notDetermined
 
     /// Demo mode: pretend to be here instead of using GPS.
-    @Published var simulated: CLLocationCoordinate2D? {
+    var simulated: CLLocationCoordinate2D? {
         didSet { if let s = simulated { coordinate = s; accuracy = 5 } }
     }
 
-    private let manager = CLLocationManager()
-    private var filter = PositionFilter()
+    @ObservationIgnored var onMove: (() -> Void)?
+    @ObservationIgnored var onHeading: (() -> Void)?
+
+    @ObservationIgnored private let manager = CLLocationManager()
+    @ObservationIgnored private var filter = PositionFilter()
 
     /// Indoors or a poor fix: turn on the safeguards (wider arrival, direction lock).
     var isPoorFix: Bool { simulated == nil && accuracy > 15 }
@@ -35,6 +38,8 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
         manager.activityType = .fitness
         authorization = manager.authorizationStatus
     }
+
+    var isAuthorized: Bool { authorization == .authorizedWhenInUse || authorization == .authorizedAlways }
 
     func start() {
         if manager.authorizationStatus == .notDetermined { manager.requestWhenInUseAuthorization() }

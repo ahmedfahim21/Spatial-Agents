@@ -1,43 +1,41 @@
 import SwiftUI
 
 struct SettingsView: View {
-    @EnvironmentObject var state: MobileState
-    @ObservedObject var location: LocationService
+    @Environment(MobileState.self) private var state
+    @AppStorage("onboarded") private var onboarded = true
+    @State private var arranging = false
 
     var body: some View {
+        @Bindable var state = state
+        let loc = state.location
         NavigationStack {
             Form {
                 Section("Head tracking") {
-                    LabeledContent("AirPods", value: state.hasHeadData ? "Tracking" : "Not tracking")
-                    Text(state.trackingStatus).font(.footnote).foregroundStyle(.secondary)
+                    LabeledContent(state.hasHeadData ? state.routeName : "AirPods", value: state.hasHeadData ? "Tracking" : "Not connected")
                     Toggle("Agents with me", isOn: $state.withMe)
-                    Button("Recenter (face forward, then tap)") { state.recenter() }
+                    Button("Recenter") { state.calibrateForward() }
+                        .disabled(!state.hasHeadData)
+                    Button("Arrange your space") { arranging = true }
                 }
                 Section("Audio") {
-                    LabeledContent("Route", value: state.route)
-                    LabeledContent("Stereo with mic open", value: state.highQualityMic ? "Yes" : "No (headset mode)")
-                    if !state.voiceStatus.isEmpty { LabeledContent("Voice", value: state.voiceStatus) }
-                    Button("Refresh") { state.refreshRoute() }
+                    LabeledContent("Output", value: state.routeName)
+                    LabeledContent("Stereo with mic open", value: state.highQualityMic ? "Yes" : "No")
+                    LabeledContent("Voices", value: state.voiceStatus.isEmpty ? "Ready" : state.voiceStatus)
                 }
-                Section("Location") {
-                    if let c = location.coordinate {
-                        LabeledContent("Position", value: String(format: "%.5f, %.5f", c.latitude, c.longitude))
-                        LabeledContent("Accuracy", value: "±\(Int(location.accuracy)) m")
-                    }
-                    if let h = location.heading { LabeledContent("Heading", value: "\(Int(h))° (±\(Int(location.headingAccuracy))°)") }
-                    Toggle("Demo mode (simulated location)", isOn: Binding(
-                        get: { location.simulated != nil },
-                        set: { state.setDemoMode($0) }
-                    ))
-                    Text("Demo mode freezes your position so you can “walk” toward agents with a button.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
+                Section {
+                    LabeledContent("Accuracy", value: loc.coordinate == nil ? "–" : "±\(Int(loc.accuracy)) m")
+                    LabeledContent("Heading", value: loc.heading.map { "\(Int($0))° \(Words.compassShort($0))" } ?? "–")
+                    Toggle("Demo mode", isOn: Binding(get: { loc.simulated != nil }, set: { state.setDemoMode($0) }))
+                } header: { Text("Location") } footer: { Text("Simulates your location for stage demos.") }
                 Section("Account") {
-                    LabeledContent("Backend", value: Config.isConfigured ? (state.backendStatus.isEmpty ? "Connected" : state.backendStatus) : "Not configured")
-                    if let id = Backend.shared.userId { LabeledContent("User", value: String(id.prefix(8))) }
+                    LabeledContent("Server", value: !Config.isConfigured ? "Not configured" : state.backendStatus.isEmpty ? "Connected" : "Offline")
+                    Button("Show the introduction") { onboarded = false }
                 }
             }
+            .tint(.primary)
             .navigationTitle("Settings")
+            .onAppear { state.refreshRoute() }
+            .sheet(isPresented: $arranging) { SetupView() }
         }
     }
 }

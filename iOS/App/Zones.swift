@@ -24,10 +24,10 @@ enum Zone: String, CaseIterable, Codable, Identifiable {
     var name: String {
         switch self {
         case .upperLeft: return "Up left"
-        case .upperCenter: return "Up ahead"
+        case .upperCenter: return "Up front"
         case .upperRight: return "Up right"
         case .left: return "Left"
-        case .center: return "Ahead"
+        case .center: return "Front"
         case .right: return "Right"
         }
     }

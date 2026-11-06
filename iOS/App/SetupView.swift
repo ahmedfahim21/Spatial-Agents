@@ -2,129 +2,138 @@ import SwiftUI
 
 /// Three steps: set forward, arrange your agents in the six zones, then try looking at them.
 struct SetupView: View {
-    enum Step: Int { case forward, arrange, tryIt }
+    enum Step: Int, CaseIterable { case forward, arrange, tryIt }
 
-    @EnvironmentObject var state: MobileState
+    @Environment(MobileState.self) private var state
     @Environment(\.dismiss) private var dismiss
     @State private var step: Step = .forward
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 20) {
-                progress
-                switch step {
-                case .forward: forward
-                case .arrange: arrange
-                case .tryIt: tryIt
+            VStack(spacing: 0) {
+                progress.padding(.top, 4)
+                Group {
+                    switch step {
+                    case .forward: forward
+                    case .arrange: arrange
+                    case .tryIt: tryIt
+                    }
                 }
+                .transition(.asymmetric(insertion: .move(edge: .trailing).combined(with: .opacity),
+                                        removal: .move(edge: .leading).combined(with: .opacity)))
             }
-            .padding()
+            .animation(Motion.smooth, value: step)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("Your space")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
             }
         }
+        .tint(.primary)
         .onAppear { state.arranging = true }
         .onDisappear { state.arranging = false }
     }
 
     private var progress: some View {
         HStack(spacing: 6) {
-            ForEach(0..<3) { i in
-                Capsule().fill(i <= step.rawValue ? Color.cyan : Color.white.opacity(0.15)).frame(height: 4)
+            ForEach(Step.allCases, id: \.self) { s in
+                Capsule()
+                    .fill(s.rawValue <= step.rawValue ? Color.primary : Color(.systemGray4))
+                    .frame(height: 4)
             }
         }
     }
 
-    // MARK: Step 1
+    // MARK: 1. Forward
 
     private var forward: some View {
-        VStack(spacing: 22) {
+        VStack(spacing: 18) {
             Spacer()
             ZStack {
-                Circle().fill(Color.cyan.opacity(0.12)).frame(width: 180, height: 180)
-                Image(systemName: "person.and.arrow.left.and.arrow.right.outward")
-                    .font(.system(size: 64)).foregroundStyle(.cyan)
-                    .opacity(0)
-                VStack(spacing: 8) {
-                    Image(systemName: "arrow.up").font(.system(size: 40, weight: .bold)).foregroundStyle(.cyan)
-                    Image(systemName: "person.fill").font(.system(size: 54)).foregroundStyle(.white)
+                Circle().fill(Color(.secondarySystemGroupedBackground)).frame(width: 200, height: 200)
+                VStack(spacing: 10) {
+                    Image(systemName: "arrow.up").font(.system(size: 34, weight: .bold))
+                    BotView(color: .cyan, shape: .circle, mood: state.hasHeadData ? .arrived : .idle, size: 80)
                 }
             }
             Text("Look straight ahead").font(.title2.bold())
-            Text("Sit or stand the way you usually work. This direction becomes the front of your space. Your agents stay arranged around it and come with you when you move.")
-                .multilineTextAlignment(.center).foregroundStyle(.secondary)
-            Label("In Control Center, keep Spatial Audio **Off** for Agentsphere. The app places sounds itself.", systemImage: "info.circle")
-                .font(.footnote).foregroundStyle(.secondary).padding(12)
-                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+            Text("Sit or stand the way you usually work. This becomes the front of your space; your agents stay arranged around it and come with you when you move.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Label("Keep Spatial Audio **Off** for Agentsphere in Control Center. The app places sounds itself.", systemImage: "info.circle")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(14)
+                .card()
             Spacer()
             if !state.hasHeadData {
                 Text("Waiting for AirPods head tracking…").font(.footnote).foregroundStyle(.orange)
             }
-            Button {
+            Button("This is forward") {
                 state.calibrateForward()
                 state.haptics.tap(intensity: 0.8, sharpness: 0.5)
-                withAnimation { step = .arrange }
-            } label: {
-                Text("This is forward").bold().frame(maxWidth: .infinity).padding(.vertical, 6)
+                step = .arrange
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(PrimaryButtonStyle())
             .disabled(!state.hasHeadData)
         }
     }
 
-    // MARK: Step 2
+    // MARK: 2. Arrange
 
     private var arrange: some View {
-        VStack(spacing: 16) {
-            Text("Place your agents").font(.title2.bold())
-            Text("Drag them between zones. Tap one to hear it speak from there.")
-                .multilineTextAlignment(.center).foregroundStyle(.secondary)
+        VStack(spacing: 14) {
+            VStack(spacing: 4) {
+                Text("Place your agents").font(.title2.bold())
+                Text("Drag them between zones. Tap one to hear it from there.")
+                    .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            }
+            .padding(.top, 18)
             SpaceStage(editing: true).frame(height: 340)
             if state.bodyAgents.isEmpty {
-                Text("You don't have any personal agents yet. Create one in the Create tab and choose “With me”.")
-                    .font(.footnote).foregroundStyle(.orange).multilineTextAlignment(.center)
+                Text("You don't have any personal agents yet. Create one with “With me”.")
+                    .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
             } else if !state.unzonedAgents.isEmpty {
-                Text("\(state.unzonedAgents.count) more agent(s) don't fit in the six zones; drag one onto a zone to swap it in.")
+                Text("These don't fit yet. Drag one onto a zone to swap it in.")
                     .font(.footnote).foregroundStyle(.secondary)
-                HStack {
+                HStack(spacing: 12) {
                     ForEach(state.unzonedAgents) { a in
-                        AgentOrb(agent: a, size: 44).draggable(a.id.uuidString) { AgentOrb(agent: a, size: 44) }
+                        BotView(agent: a, size: 44).draggable(a.id.uuidString) { BotView(agent: a, size: 44) }
                     }
                 }
             }
             Spacer()
-            Button { withAnimation { step = .tryIt } } label: {
-                Text("Next").bold().frame(maxWidth: .infinity).padding(.vertical, 6)
-            }
-            .buttonStyle(.borderedProminent)
+            Button("Next") { step = .tryIt }.buttonStyle(PrimaryButtonStyle())
         }
     }
 
-    // MARK: Step 3
+    // MARK: 3. Try it
 
     private var tryIt: some View {
-        VStack(spacing: 16) {
-            Text("Try looking around").font(.title2.bold())
-            Text("Each agent lights up as your gaze lands on it. Later, hold your gaze for 3 seconds to start talking.")
-                .multilineTextAlignment(.center).foregroundStyle(.secondary)
-            SpaceStage().frame(height: 340)
-            if let a = state.agent(state.focusedId) {
-                Text("Looking at \(a.name)").font(.headline).foregroundStyle(a.tint)
-            } else {
-                Text(" ").font(.headline)
+        VStack(spacing: 14) {
+            VStack(spacing: 4) {
+                Text("Try looking around").font(.title2.bold())
+                Text("Each agent notices when your gaze lands on it. Later, hold your gaze for three seconds to talk.")
+                    .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
+            .padding(.top, 18)
+            SpaceStage().frame(height: 340)
+            Text(state.agent(state.focusedId).map { "Looking at \($0.name)" } ?? " ")
+                .font(.headline)
+                .contentTransition(.opacity)
+                .animation(Motion.snappy, value: state.focusedId)
             Spacer()
-            HStack {
-                Button("Back") { withAnimation { step = .arrange } }.buttonStyle(.bordered)
-                Button {
+            HStack(spacing: 10) {
+                Button("Back") { step = .arrange }.buttonStyle(SecondaryButtonStyle(fullWidth: false))
+                Button("Done") {
                     state.finishSetup()
                     dismiss()
-                } label: {
-                    Text("Done").bold().frame(maxWidth: .infinity).padding(.vertical, 6)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(PrimaryButtonStyle())
             }
         }
     }

@@ -1,198 +1,287 @@
 import CoreLocation
+import MapKit
 import SwiftUI
 
-/// Agents placed in the world near you, nearest first.
+/// Agents placed in the world near you, as a list or on a map.
 struct ExploreView: View {
-    @EnvironmentObject var state: MobileState
-    @ObservedObject private var loc: LocationService
-    enum Mode: String, CaseIterable { case map = "Map", list = "List" }
-    @State private var mode: Mode = .map
-    @State private var path: [UUID] = []
+    enum Mode: String { case list, map }
 
-    init(location: LocationService) { _loc = ObservedObject(wrappedValue: location) }
+    @Environment(MobileState.self) private var state
+    @AppStorage("exploreMode") private var mode: Mode = .list
+    @State private var selected: UUID?
+    @State private var finding: FindTarget?
+
+    var body: some View {
+        Group {
+            switch mode {
+            case .list: list.transition(.opacity)
+            case .map: map.transition(.opacity)
+            }
+        }
+        .animation(Motion.snappy, value: mode)
+        .fullScreenCover(item: $finding) { FindView(agentId: $0.id) }
+        .task {
+            #if DEBUG
+            if let id = state.sampleFindTarget, ["find", "arrived"].contains(state.sampleScene) { finding = FindTarget(id: id) }
+            #endif
+            await state.refreshNearby(force: true)
+        }
+    }
 
     private var sorted: [Agent] {
         state.nearby.sorted { (state.distance(to: $0) ?? .infinity) < (state.distance(to: $1) ?? .infinity) }
     }
 
-    var body: some View {
-        NavigationStack(path: $path) {
-            Group {
-                if mode == .map {
-                    ExploreMap(location: loc) { path.append($0) }
-                        .safeAreaInset(edge: .top) { mapStatus }
-                } else {
-                    list
-                }
-            }
-            .navigationTitle("Explore")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Picker("View", selection: $mode) { ForEach(Mode.allCases, id: \.self) { Text($0.rawValue) } }
-                        .pickerStyle(.segmented).frame(width: 160)
-                }
-            }
-            .navigationDestination(for: UUID.self) { id in FindView(agentId: id, location: loc) }
-            .task { await state.refreshNearby(force: true) }
+    private func open(_ a: Agent) { finding = FindTarget(id: a.id) }
+
+    private var header: some View {
+        HStack(alignment: .center) {
+            ScreenTitle("Explore")
+            ModeToggle(mode: $mode)
         }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
     }
 
-    /// The same notices as the list, compact over the map.
-    @ViewBuilder private var mapStatus: some View {
-        let notices = VStack(alignment: .leading, spacing: 6) { statusSection }
-            .font(.footnote)
-        notices
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.ultraThinMaterial)
-            .opacity(hasNotice ? 1 : 0)
-    }
-
-    private var hasNotice: Bool {
-        !Config.isConfigured || loc.coordinate == nil || !state.backendStatus.isEmpty || loc.simulated != nil
-            || loc.isPoorFix || loc.authorization == .denied
-    }
+    // MARK: List
 
     private var list: some View {
-            List {
-                statusSection
-                if !sorted.isEmpty {
-                    Section("Nearby") {
-                        ForEach(sorted) { a in
-                            NavigationLink(value: a.id) { NearbyRow(agent: a, location: loc) }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                header
+                Notices().padding(.horizontal, 16)
+                if sorted.isEmpty {
+                    if state.location.coordinate != nil, !state.loading { EmptyExplore() }
+                } else {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Nearby").font(.title3.bold()).padding(.horizontal, 16)
+                        VStack(spacing: 0) {
+                            ForEach(Array(sorted.enumerated()), id: \.element.id) { i, a in
+                                if i > 0 { RowDivider(leading: 76) }
+                                Button { open(a) } label: { NearbyRow(agent: a) }
+                                    .buttonStyle(PressableStyle())
+                            }
                         }
+                        .card()
+                        .padding(.horizontal, 16)
                     }
-                } else if loc.coordinate != nil, Config.isConfigured, !state.loading {
-                    ContentUnavailableView("No agents here yet", systemImage: "mappin.slash",
-                                           description: Text("Create one and leave it here for others to find."))
-                        .listRowBackground(Color.clear)
                 }
             }
-            .refreshable { await state.refreshNearby(force: true) }
+            .padding(.bottom, 24)
+            .animation(Motion.snappy, value: sorted.map(\.id))
+        }
+        .background(Color(.systemGroupedBackground))
+        .refreshable { await state.refreshNearby(force: true) }
     }
 
-    @ViewBuilder private var statusSection: some View {
-        if !Config.isConfigured {
-            Label("Connect the backend in Config.swift to see agents.", systemImage: "server.rack").foregroundStyle(.orange)
-        } else if loc.authorization == .denied || loc.authorization == .restricted {
-            Label("Location is off. Allow it in Settings to find agents.", systemImage: "location.slash").foregroundStyle(.orange)
-        } else if loc.coordinate == nil {
-            Label("Finding your location…", systemImage: "location")
-        }
-        if !state.backendStatus.isEmpty {
-            Label(state.backendStatus, systemImage: "exclamationmark.triangle").foregroundStyle(.red).font(.footnote)
-        }
-        if loc.simulated != nil {
-            Label("Demo mode: simulated location", systemImage: "theatermasks").foregroundStyle(.purple).font(.footnote)
-        } else if loc.isPoorFix, loc.coordinate != nil {
-            Label("GPS is rough here (±\(Int(loc.accuracy)) m). Arrival is more forgiving.", systemImage: "location.circle")
-                .foregroundStyle(.secondary).font(.footnote)
-        }
+    // MARK: Map
+
+    private var map: some View {
+        ExploreMap(selected: $selected)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                header
+                    .padding(.bottom, 16)
+                    .background(
+                        LinearGradient(colors: [Color(.systemBackground).opacity(0.9), Color(.systemBackground).opacity(0)],
+                                       startPoint: .top, endPoint: .bottom)
+                            .ignoresSafeArea(edges: .top)
+                    )
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if let a = state.agent(selected) {
+                    SelectedCard(agent: a) { open(a) }
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 8)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(Motion.smooth, value: selected)
     }
 }
 
-struct NearbyRow: View {
-    @EnvironmentObject var state: MobileState
+struct FindTarget: Identifiable { let id: UUID }
+
+/// List / map switch: a white pill slides between the two icons.
+private struct ModeToggle: View {
+    @Binding var mode: ExploreView.Mode
+    @Namespace private var pill
+
+    var body: some View {
+        HStack(spacing: 2) {
+            option(.list, "list.bullet")
+            option(.map, "map")
+        }
+        .padding(3)
+        .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func option(_ m: ExploreView.Mode, _ icon: String) -> some View {
+        Button {
+            withAnimation(Motion.snappy) { mode = m }
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(mode == m ? .primary : .secondary)
+                .frame(width: 44, height: 32)
+                .background {
+                    if mode == m {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(Color(.secondarySystemGroupedBackground))
+                            .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
+                            .matchedGeometryEffect(id: "pill", in: pill)
+                    }
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(m == .list ? "List" : "Map")
+    }
+}
+
+private struct NearbyRow: View {
+    @Environment(MobileState.self) private var state
     let agent: Agent
-    @ObservedObject var location: LocationService
 
     var body: some View {
+        let here = state.arrived.contains(agent.id)
         HStack(spacing: 14) {
-            AgentOrb(agent: agent, size: 46, active: state.activeId == agent.id)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(agent.name).font(.headline)
-                HStack(spacing: 6) {
-                    if agent.isMine == true && !agent.isPublic { Badge(text: "Only you", color: .purple) }
-                    Badge(text: agent.pricing == "paid" ? "Paid" : "Free", color: .green)
-                    if state.arrived.contains(agent.id) { Badge(text: "Here", color: .cyan) }
-                }
+            BotView(agent: agent, mood: here ? state.mood(for: agent) : .idle, size: 44, look: here ? state.look(for: agent) : 0)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(agent.name).font(.body.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
+                subtitle
             }
-            Spacer()
-            VStack(spacing: 2) {
-                if let rot = state.screenArrow(to: agent) {
-                    Image(systemName: "location.north.fill").rotationEffect(.degrees(rot)).foregroundStyle(agent.tint)
+            Spacer(minLength: 8)
+            if here {
+                Text("Here").font(.body.weight(.semibold)).foregroundStyle(.primary)
+            } else if let d = state.distance(to: agent) {
+                HStack(spacing: 6) {
+                    Text(Words.distance(d)).monospacedDigit()
+                    if let rot = state.screenArrow(to: agent) ?? state.bearing(to: agent) {
+                        Image(systemName: "location.north.fill")
+                            .font(.system(size: 11))
+                            .rotationEffect(.degrees(rot))
+                            .animation(Motion.smooth, value: rot)
+                    }
                 }
-                if let d = state.distance(to: agent) {
-                    Text(GeoMath.describe(distance: d)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                }
+                .font(.body)
+                .foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    @ViewBuilder private var subtitle: some View {
+        if agent.isMine == true && !agent.isPublic {
+            Label("Only you", systemImage: "lock.fill")
+                .labelStyle(TightLabel())
+                .font(.subheadline).foregroundStyle(.secondary)
+        } else {
+            Text(agent.pricing == "paid" ? "Paid" : "Free").font(.subheadline).foregroundStyle(.secondary)
+        }
     }
 }
 
-/// Find My-style: big arrow and distance, haptics and a beacon; on arrival, stare to talk.
-struct FindView: View {
-    @EnvironmentObject var state: MobileState
-    let agentId: UUID
-    @ObservedObject var location: LocationService
+private struct TightLabel: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 4) {
+            configuration.icon.font(.caption2)
+            configuration.title
+        }
+    }
+}
+
+/// Location, GPS and backend notices, in the design's quiet grey card.
+private struct Notices: View {
+    @Environment(MobileState.self) private var state
 
     var body: some View {
-        if let a = state.agent(agentId) {
-            VStack(spacing: 0) {
-                if state.arrived.contains(a.id) {
-                    arrivedHeader(a)
-                    Divider()
-                    ConversationView(agent: a)
-                } else {
-                    finding(a)
-                }
+        let loc = state.location
+        VStack(spacing: 8) {
+            if !Config.isConfigured {
+                notice("server.rack", "Connect the backend in Config.swift to see agents.")
+            } else if loc.authorization == .denied || loc.authorization == .restricted {
+                notice("location.slash", "Location is off. Allow it in Settings to find agents near you.")
+            } else if loc.coordinate == nil {
+                notice("location", "Finding your location…")
             }
-            .navigationTitle(a.name)
-            .navigationBarTitleDisplayMode(.inline)
-            .onAppear { state.findTargetId = a.id }
-            .onDisappear { if state.findTargetId == a.id { state.findTargetId = nil } }
-        } else {
-            ContentUnavailableView("Agent unavailable", systemImage: "questionmark.circle")
-        }
-    }
-
-    private func finding(_ a: Agent) -> some View {
-        VStack(spacing: 28) {
-            Spacer()
-            ZStack {
-                Circle().fill(a.tint.opacity(0.12)).frame(width: 260, height: 260)
-                Circle().stroke(a.tint.opacity(0.35), lineWidth: 2).frame(width: 260, height: 260)
-                if let rot = state.screenArrow(to: a) {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 120, weight: .heavy))
-                        .foregroundStyle(a.tint)
-                        .rotationEffect(.degrees(rot))
-                        .animation(.easeOut(duration: 0.25), value: rot)
-                } else {
-                    ProgressView()
-                }
+            if !state.backendStatus.isEmpty {
+                notice("exclamationmark.triangle", state.backendStatus)
             }
-            if let d = state.distance(to: a) {
-                Text(GeoMath.describe(distance: max(0, d - state.arrivalRadius(for: a))))
-                    .font(.system(size: 56, weight: .bold, design: .rounded)).monospacedDigit()
-                Text("to \(a.name)").font(.title3).foregroundStyle(.secondary)
-            }
-            Text("Feel the pulses speed up as you get closer. With AirPods in, listen for its beacon.")
-                .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal, 40)
-            Spacer()
-            if location.simulated != nil {
-                Button { state.demoStep(toward: a) } label: { Label("Walk 10 m closer", systemImage: "figure.walk") }
-                    .buttonStyle(.borderedProminent).padding(.bottom)
+            if loc.simulated != nil {
+                notice("theatermasks", "Demo mode: your location is simulated.")
+            } else if loc.isPoorFix, loc.coordinate != nil {
+                notice("info.circle", "GPS is rough indoors (±\(Int(loc.accuracy)) m), so arrival is more forgiving.")
             }
         }
     }
 
-    private func arrivedHeader(_ a: Agent) -> some View {
-        VStack(spacing: 10) {
-            StareOrb(agent: a, size: 84)
-                .padding(.top, 12)
-            if state.activeId == a.id {
-                PhaseLabel(phase: state.phase)
-            } else if state.hasHeadData {
-                Text(state.focusedId == a.id ? "Keep looking…" : "Turn toward \(a.name) to talk")
-                    .font(.footnote).foregroundStyle(.secondary)
-            } else {
-                Button("Talk") { state.wake(a) }.buttonStyle(.borderedProminent)
+    private func notice(_ icon: String, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon).font(.body)
+            Text(text).font(.subheadline).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .foregroundStyle(.secondary)
+        .padding(14)
+        .card()
+    }
+}
+
+private struct EmptyExplore: View {
+    @Environment(MobileState.self) private var state
+
+    var body: some View {
+        VStack(spacing: 14) {
+            BotView(color: .violet, shape: .squircle, mood: .far, size: 64)
+            Text("No agents here yet").font(.title3.bold())
+            Text("Leave one here for others to find, or try somewhere busier.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Create an agent") {
+                state.createFlavor = .publicPlace
+                state.screen = .create
             }
+            .buttonStyle(SecondaryButtonStyle(fullWidth: false))
+            .padding(.top, 4)
         }
         .frame(maxWidth: .infinity)
-        .padding(.bottom, 10)
+        .padding(.horizontal, 32)
+        .padding(.top, 48)
+    }
+}
+
+/// The agent you tapped on the map: who, how far, and Find.
+private struct SelectedCard: View {
+    @Environment(MobileState.self) private var state
+    let agent: Agent
+    let find: () -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 14) {
+                BotView(agent: agent, mood: state.mood(for: agent), size: 48)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(agent.name).font(.headline)
+                    Text(detail).font(.subheadline).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            Button(state.arrived.contains(agent.id) ? "Talk" : "Find", action: find)
+                .buttonStyle(PrimaryButtonStyle())
+        }
+        .padding(16)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .shadow(color: .black.opacity(0.12), radius: 18, y: 6)
+    }
+
+    private var detail: String {
+        var parts: [String] = []
+        if state.arrived.contains(agent.id) {
+            parts.append("You're here")
+        } else if let d = state.distance(to: agent) {
+            parts.append(Words.distance(d) + (state.bearing(to: agent).map { " " + Words.compass($0) } ?? ""))
+        }
+        parts.append(agent.isMine == true && !agent.isPublic ? "Only you" : agent.pricing == "paid" ? "Paid" : "Free")
+        return parts.joined(separator: " · ")
     }
 }
