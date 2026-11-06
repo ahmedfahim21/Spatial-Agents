@@ -176,8 +176,10 @@ final class MobileState: ObservableObject {
             myAgents = try await backend.myAgents()
             backendStatus = ""
             syncPlacement()
+            print("Agentsphere: my agents: \(myAgents.map { "\($0.name) [\($0.isGeo ? "geo" : "body")\(zones[$0.id].map { ", " + $0.name } ?? "")]" })")
         } catch {
             backendStatus = error.localizedDescription
+            print("Agentsphere: loading my agents failed: \(error.localizedDescription)")
         }
     }
 
@@ -448,6 +450,7 @@ final class MobileState: ObservableObject {
             next = best.0
         }
         if next != focusedId {
+            print("Agentsphere: focus → \(agent(next)?.name ?? "nobody") (yaw \(Int(yawBody))°, pitch \(Int(headPitch))°)")
             focusedId = next
             stareProgress = 0
             lastFocusAt = Date()
@@ -510,6 +513,7 @@ final class MobileState: ObservableObject {
 
     /// Starts talking with an agent (after a stare, or a tap).
     func wake(_ a: Agent) {
+        print("Agentsphere: wake \(a.name)")
         if activeId != nil, activeId != a.id { endConversation() }
         activeId = a.id
         stareProgress = 0
@@ -545,6 +549,7 @@ final class MobileState: ObservableObject {
 
     private func startListening() {
         guard let id = activeId else { return }
+        print("Agentsphere: listening")
         phase = .listening
         transcript = ""
         lastHeardAt = Date()
@@ -552,6 +557,7 @@ final class MobileState: ObservableObject {
         speech.begin { [weak self] error in
             guard let self else { return }
             if let error {
+                print("Agentsphere: listening failed: \(error)")
                 self.post(ChatMessage(.error, error), to: id)
                 self.phase = .idle
                 return
@@ -573,6 +579,7 @@ final class MobileState: ObservableObject {
     func send(_ raw: String, to agentId: UUID? = nil) {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let id = agentId ?? activeId, let a = agent(id) else { return }
+        print("Agentsphere: send to \(a.name): \(text)")
         if activeId != id { activeId = id; ensurePlaced(a) }
         _ = speech.finish()
         transcript = ""
@@ -601,6 +608,7 @@ final class MobileState: ObservableObject {
                 // Queued after every piece, so it runs once they've all been handled.
                 DispatchQueue.main.async { MainActor.assumeIsolated { reply.finish(empty: full.isEmpty) } }
             } catch {
+                print("Agentsphere: reply failed: \(error.localizedDescription)")
                 self.updateMessage(placeholder.id, of: id) { $0.kind = .error; $0.text = error.localizedDescription }
                 self.phase = .speaking
                 self.audio.speak("Sorry, I couldn't answer that.", from: id, prelude: .error)
@@ -619,6 +627,7 @@ final class MobileState: ObservableObject {
     }
 
     fileprivate func replyDone(spokeAny: Bool, empty: Bool, messageId: UUID, agentId: UUID) {
+        print("Agentsphere: reply done (\(messages(for: agentId).last?.text.count ?? 0) chars)")
         if empty { updateMessage(messageId, of: agentId) { $0.text = "…" } }
         if !spokeAny, activeId == agentId { startListening() }
     }
