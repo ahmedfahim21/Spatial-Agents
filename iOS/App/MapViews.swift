@@ -27,8 +27,10 @@ struct ExploreMap: View {
                 MapCircle(center: a.coordinate!, radius: a.radiusM)
                     .foregroundStyle(a.tint.opacity(selected == a.id ? 0.22 : 0.14))
                     .stroke(a.tint.opacity(0.55), lineWidth: 1)
+                // Annotation content is hosted outside this view tree on device, so it can't
+                // read the environment: hand it everything it needs.
                 Annotation(a.name, coordinate: a.coordinate!, anchor: .center) {
-                    MapBot(agent: a, selected: selected == a.id)
+                    MapBot(agent: a, mood: state.mood(for: a), distance: state.distance(to: a), selected: selected == a.id)
                 }
                 .annotationTitles(.hidden)
                 .tag(a.id)
@@ -52,8 +54,9 @@ struct ExploreMap: View {
 
 /// An agent on the map: bigger when it's close, with its name when selected.
 private struct MapBot: View {
-    @Environment(MobileState.self) private var state
     let agent: Agent
+    let mood: BotMood
+    let distance: Double?
     let selected: Bool
 
     var body: some View {
@@ -66,7 +69,7 @@ private struct MapBot: View {
                     .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
                     .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .bottom)))
             }
-            BotView(agent: agent, mood: state.mood(for: agent), size: size)
+            BotView(agent: agent, mood: mood, size: size)
                 .shadow(color: .black.opacity(0.15), radius: 3, y: 1)
         }
         .animation(Motion.snappy, value: selected)
@@ -74,7 +77,7 @@ private struct MapBot: View {
 
     private var size: CGFloat {
         if selected { return 44 }
-        guard let d = state.distance(to: agent) else { return 26 }
+        guard let d = distance else { return 26 }
         switch d {
         case ..<60: return 34
         case ..<250: return 28

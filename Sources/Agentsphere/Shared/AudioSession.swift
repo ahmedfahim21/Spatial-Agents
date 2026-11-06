@@ -10,7 +10,9 @@ enum AudioSession {
         let session = AVAudioSession.sharedInstance()
         do {
             try session.setCategory(.playAndRecord, mode: .default,
-                                    options: [.bluetoothHighQualityRecording, .allowBluetoothHFP, .allowBluetoothA2DP])
+                                    options: [.bluetoothHighQualityRecording, .allowBluetoothHFP, .allowBluetoothA2DP,
+                                              // Without headphones, play from the loudspeaker, not the earpiece.
+                                              .defaultToSpeaker])
             try session.setPrefersNoInterruptionsFromSystemAlerts(true)
             try session.setActive(true)
         } catch {
