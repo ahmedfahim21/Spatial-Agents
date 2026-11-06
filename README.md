@@ -1,10 +1,9 @@
 # Agentsphere
 
-Your AI agents sit in the space around you. Look at one, nod, and talk. It replies from where it sits, and when it needs permission it asks in your ear and you nod or shake.
+Your AI agents sit in the space around you. Look at one, nod, and talk. It replies from where it sits.
 
-There are three parts:
+There are two parts:
 
-- **Mac app:** your Claude Code sessions around your head, with permission prompts answered by nodding or shaking.
 - **iPhone app:** personal agents that travel with you, and agents placed in the real world for you or anyone nearby to find.
 - **Landing page:** the site in `web/`.
 
@@ -12,42 +11,10 @@ There are three parts:
 
 | Gesture | Meaning |
 |---|---|
-| Turn toward an agent | Select it (its ring lights up, with a soft tick from its direction) |
-| Nod | Wake it, or approve what it asked |
-| Shake | Deny, or end the conversation |
-| Speak | Talk to the agent you're facing (⌥Space push-to-talk on the Mac) |
-
-## Mac app
-
-Needs macOS 14+, Xcode command line tools, Claude Code (`claude`) installed and logged in, and AirPods Pro / Max / 3 / 4.
-
-```bash
-./build.sh run
-```
-
-Allow **Motion**, **Microphone** and **Speech Recognition** when asked.
-
-1. Put your AirPods in, face the screen, press **Recenter**.
-2. Add a Claude session: start one in a project folder, or pick a live or recent session to resume. Add a second one.
-3. Drag each agent to a spot around you (default: first on your left, second on your right).
-4. Turn your head toward one. Its ring lights up and you hear a soft tick from its direction.
-5. Press **⌥Space**, say an instruction, press **⌥Space** again. It's sent to the agent you're facing.
-6. The reply is spoken from that agent's position. The full text is in the log.
-7. When an agent needs permission, it asks from its position ("Left: wants to run npm install"). Nod to allow, shake to deny.
-
-If turning right selects the agent on your left, tick **Invert direction**.
-
-Read-only tools (Read, Grep, Glob and similar) are allowed automatically. No answer within 60 seconds is a deny. Each decision is bound to a SHA-256 hash of the exact tool name and arguments.
-
-| Piece | File | What it does |
-|---|---|---|
-| Head tracking | `Shared/HeadTracker.swift` | `CMHeadphoneMotionManager` pose from AirPods; nods and shakes from angular velocity |
-| Spatial voices | `Shared/SpatialAudio.swift` | `AVAudioEnvironmentNode` + HRTF; each agent is a sound source, moved opposite your head so it stays put in the room |
-| Focus | `AppState.swift` | Nearest agent within ±focus width of where you're facing |
-| Talking back | `Shared/SpeechInput.swift` | On-device `SFSpeechRecognizer` push-to-talk |
-| Claude sessions | `ClaudeRunner.swift` | Each turn runs `claude -p "<text>" --resume <session_id> --output-format json` in the agent's folder, so the conversation continues |
-| Approvals | `PermissionServer.swift` | Local HTTP server; a `PreToolUse` hook in each agent's folder holds the tool call until you answer |
-| Finding sessions | `SessionDiscovery.swift` | Lists live and recent Claude Code sessions from `~/.claude` |
+| Turn toward an agent | Select it (its ring lights up) |
+| Nod | Wake it |
+| Shake | End the conversation |
+| Speak | Talk to the agent you've woken |
 
 ## iPhone app
 
@@ -113,11 +80,6 @@ approving. Above the visitor's limit ($5 a purchase, $20 a day by default) the p
 3. `npx supabase db push --remote` and deploy the functions (`shop`, `pay`, `merchant`, `world`, `chat`).
 4. Call `POST /functions/v1/merchant/setup` once (signed in): associates the operator with USDC and creates the audit topic.
 5. Send test USDC to the operator from [faucet.circle.com](https://faucet.circle.com) (Hedera Testnet). New buyer wallets start with 10 USDC from it.
-
-## Known limits
-
-- **Mic:** if your AirPods are also the mic, macOS switches them to call-quality audio and spatial sound suffers. Set the input to the MacBook mic (System Settings › Sound › Input).
-- **Sessions are headless:** each turn runs `claude -p` and resumes the conversation by session id. It doesn't type into an open terminal.
 
 ## AI tools
 
