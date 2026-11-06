@@ -68,6 +68,7 @@ struct ConversationView: View {
     @EnvironmentObject var state: MobileState
     let agent: Agent
     @State private var typed = ""
+    @FocusState private var typing: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -87,10 +88,13 @@ struct ConversationView: View {
                 .onChange(of: state.messages(for: agent.id).last?.text) { _, _ in withAnimation { proxy.scrollTo("end") } }
                 .onChange(of: state.transcript) { _, _ in proxy.scrollTo("end") }
                 .onAppear { proxy.scrollTo("end") }
+                .scrollDismissesKeyboard(.interactively)
             }
             HStack {
                 TextField("Message \(agent.name)", text: $typed)
                     .textFieldStyle(.roundedBorder)
+                    .focused($typing)
+                    .submitLabel(.send)
                     .onSubmit(sendTyped)
                 Button(action: sendTyped) { Image(systemName: "arrow.up.circle.fill").font(.title2) }
                     .disabled(typed.trimmingCharacters(in: .whitespaces).isEmpty)

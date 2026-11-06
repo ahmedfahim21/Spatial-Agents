@@ -28,6 +28,7 @@ struct CreateView: View {
     @State private var wallet = ""
     @State private var saving = false
     @State private var message: String?
+    @FocusState private var typing: Bool
 
     private var needsLocation: Bool { flavor != .withMe }
     private var canSave: Bool {
@@ -93,6 +94,14 @@ struct CreateView: View {
                     if let message { Text(message).font(.footnote).foregroundStyle(message.hasPrefix("Created") ? .green : .red) }
                 }
             }
+            .focused($typing)
+            .scrollDismissesKeyboard(.interactively)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { typing = false }.bold()
+                }
+            }
             .navigationTitle("Create")
         }
     }
@@ -114,6 +123,7 @@ struct CreateView: View {
             radiusM: radius,
             walletAddress: wallet.isEmpty ? nil : wallet.trimmingCharacters(in: .whitespaces)
         )
+        typing = false
         saving = true
         message = nil
         Task {
