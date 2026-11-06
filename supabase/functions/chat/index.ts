@@ -4,13 +4,21 @@
 // `[[order item=<n> qty=<q>]]` line, which is never streamed; instead this asks the visitor's
 // wallet agent (the pay function) to pay, and sends `data: {"order": ...}` events.
 import { admin, caller, cors, json } from "../_shared/common.ts";
+import { TOOL_PROMPT, toolsFor } from "./tools.ts";
 
 const ROUTER = "https://router-api.0g.ai/v1/chat/completions";
 const MODEL = Deno.env.get("ZG_MODEL") ?? "claude-haiku-5.5";
-const MAX_TURNS = 24;
+const MAX_TURNS = 40;
 const MAX_CHARS = 2000;
+const MAX_TOOL_CHARS = 6000;
 
-type Turn = { role: "user" | "assistant"; content: string };
+type ToolCall = { id: string; type: "function"; function: { name: string; arguments: string } };
+type Turn =
+  | { role: "user"; content: string }
+  | { role: "assistant"; content: string | null; tool_calls?: ToolCall[] }
+  | { role: "tool"; tool_call_id: string; content: string };
+// deno-lint-ignore no-explicit-any
+type RawTurn = any;
 type AgentRow = {
   id: string; owner_id: string; name: string; anchor: string; visibility: string; greeting: string; context: string;
   pricing: string; model: string | null; items: Item[];
@@ -60,8 +68,9 @@ async function chatModels(): Promise<Map<string, ModelInfo>> {
 
 /// The request body for one model. Spoken replies need the answer quickly, so models that
 /// can switch their "thinking" off get it off, and others get room to think before answering.
-function completion(model: string, info: ModelInfo | undefined, messages: unknown[]) {
+function completion(model: string, info: ModelInfo | undefined, messages: unknown[], tools: unknown[]) {
   const body: Record<string, unknown> = { model, stream: true, max_tokens: model === MODEL ? 400 : 1200, messages };
+  if (tools.length) body.tools = tools;
   if (info?.params.includes("chat_template_kwargs")) body.chat_template_kwargs = { enable_thinking: false };
   return body;
 }
@@ -73,7 +82,15 @@ Deno.serve(async (req) => {
   const t0 = performance.now();
   const marks: Record<string, number> = {};
   const mark = (k: string) => (marks[k] = Math.round(performance.now() - t0));
-  let body: { agent_id?: string; messages?: Turn[]; warm?: boolean };
+  let body: {
+    agent_id?: string;
+    messages?: RawTurn[];
+    warm?: boolean;
+    /** Tool groups the owner allowed for this agent on their phone (see tools.ts). */
+    tools?: string[];
+    /** The phone's local time, so "tomorrow at 10" means the right thing. */
+    client?: { now?: string; timezone?: string };
+  };
   try {
     body = await req.json();
   } catch {
@@ -98,25 +115,25 @@ Deno.serve(async (req) => {
     return json({ error: "Agent not found" }, 404);
   }
 
-  const turns = (body.messages ?? [])
-    .filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
-    .slice(-MAX_TURNS)
-    .map((m) => ({ role: m.role, content: m.content.slice(0, MAX_CHARS) }));
+  const turns = cleanTurns(body.messages ?? []);
   // The greeting lives in the system prompt; the conversation itself must open with the user.
-  while (turns.length > 0 && turns[0].role === "assistant") turns.shift();
-  if (turns.length === 0 || turns[turns.length - 1].role !== "user") {
+  while (turns.length > 0 && turns[0].role !== "user") turns.shift();
+  const last = turns[turns.length - 1]?.role;
+  if (last !== "user" && last !== "tool") {
     return json({ error: "The last message must be from the user" }, 400);
   }
+  // Phone tools only for your own private agents: never a public agent, never someone else's.
+  const tools = agent.owner_id === uid && agent.visibility === "private" ? toolsFor(body.tools) : [];
 
   const key = Deno.env.get("ZG_API_KEY");
   if (!key) return json({ error: "The server has no 0G API key configured" }, 500);
 
-  const messages = [{ role: "system", content: systemPrompt(agent) }, ...turns];
+  const messages = [{ role: "system", content: systemPrompt(agent, tools.length > 0, body.client) }, ...turns];
   const ask = (model: string, info?: ModelInfo) =>
     fetch(ROUTER, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify(completion(model, info, messages)),
+      body: JSON.stringify(completion(model, info, messages, tools)),
     });
   let upstream: Response;
   const wanted = agent.model && agent.model !== MODEL ? agent.model : null;
@@ -156,6 +173,8 @@ Deno.serve(async (req) => {
       // waits for the next chunk to tell.
       let held = "";
       let marker = "";
+      // Tool calls arrive in pieces, by index.
+      const calls: { id: string; name: string; args: string }[] = [];
       const emit = (text: string) => {
         if (marker) { marker += text; return; }
         held += text;
@@ -179,10 +198,17 @@ Deno.serve(async (req) => {
             const payload = line.slice(5).trim();
             if (payload === "[DONE]") continue;
             try {
-              const text = JSON.parse(payload).choices?.[0]?.delta?.content;
+              const delta = JSON.parse(payload).choices?.[0]?.delta;
+              const text = delta?.content;
               if (text) {
                 if (firstText) { firstText = false; mark("first_token"); }
                 emit(text);
+              }
+              for (const tc of delta?.tool_calls ?? []) {
+                const c = (calls[tc.index ?? 0] ??= { id: "", name: "", args: "" });
+                if (tc.id) c.id = tc.id;
+                if (tc.function?.name) c.name += tc.function.name;
+                if (tc.function?.arguments) c.args += tc.function.arguments;
               }
             } catch { /* keep-alive or partial line */ }
           }
@@ -192,6 +218,14 @@ Deno.serve(async (req) => {
       }
       if (held) send(`data: ${JSON.stringify({ text: held })}\n\n`);
       mark("done");
+      const wanted = calls.filter((c) => c?.name).map((c, i) => ({
+        id: c.id || `call_${i}`, name: c.name, arguments: c.args || "{}",
+      }));
+      if (wanted.length) {
+        // The app runs these on the phone and asks again with the results.
+        send(`data: ${JSON.stringify({ tool_calls: wanted })}\n\n`);
+        mark("tool_calls");
+      }
       const order = agent!.items.length ? marker.match(ORDER) : null;
       const item = order ? agent!.items[Number(order[1]) - 1] : undefined;
       if (item) {
@@ -247,7 +281,32 @@ function menu(items: Item[]): string {
   ].join("\n");
 }
 
-function systemPrompt(a: AgentRow): string {
+/** Keeps only well-formed user, assistant (with any tool calls) and tool messages. */
+function cleanTurns(raw: RawTurn[]): Turn[] {
+  const out: Turn[] = [];
+  for (const m of raw.slice(-MAX_TURNS)) {
+    if (!m || typeof m !== "object") continue;
+    if (m.role === "user" && typeof m.content === "string") {
+      out.push({ role: "user", content: m.content.slice(0, MAX_CHARS) });
+    } else if (m.role === "assistant") {
+      const calls: ToolCall[] = (Array.isArray(m.tool_calls) ? m.tool_calls : [])
+        .filter((c: RawTurn) => typeof c?.id === "string" && typeof c?.function?.name === "string")
+        .slice(0, 4)
+        .map((c: RawTurn) => ({
+          id: c.id, type: "function" as const,
+          function: { name: c.function.name, arguments: String(c.function.arguments ?? "{}").slice(0, MAX_CHARS) },
+        }));
+      const content = typeof m.content === "string" ? m.content.slice(0, MAX_CHARS) : "";
+      if (calls.length) out.push({ role: "assistant", content: content || null, tool_calls: calls });
+      else if (content) out.push({ role: "assistant", content });
+    } else if (m.role === "tool" && typeof m.tool_call_id === "string") {
+      out.push({ role: "tool", tool_call_id: m.tool_call_id, content: String(m.content ?? "").slice(0, MAX_TOOL_CHARS) });
+    }
+  }
+  return out;
+}
+
+function systemPrompt(a: AgentRow, tools = false, client?: { now?: string; timezone?: string }): string {
   const where = a.anchor === "geo"
     ? "You live at a real place; people walk up to you and talk to you through their AirPods."
     : "You travel with your owner, sitting around them in spatial audio.";
@@ -256,6 +315,10 @@ function systemPrompt(a: AgentRow): string {
     a.context ? `What you know and how you behave:\n${a.context}` : "",
     a.greeting ? `You introduced yourself with: "${a.greeting}"` : "",
     a.items.length ? menu(a.items) : "",
+    typeof client?.now === "string"
+      ? `It's now ${client.now.slice(0, 40)}${typeof client.timezone === "string" ? ` (${client.timezone.slice(0, 40)})` : ""} for the person you're talking to.`
+      : "",
+    tools ? TOOL_PROMPT : "",
     "Your replies are spoken aloud. Keep them to one to three short sentences, conversational, " +
     "with no markdown, lists, links, or emoji. If you don't know something, say so briefly.",
   ].filter(Boolean).join("\n\n");
