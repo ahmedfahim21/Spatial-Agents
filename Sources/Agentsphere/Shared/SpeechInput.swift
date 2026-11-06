@@ -1,8 +1,10 @@
 import AVFoundation
-import AudioToolbox
-import CoreAudio
 import Foundation
 import Speech
+#if os(macOS)
+import AudioToolbox
+import CoreAudio
+#endif
 
 /// Transcribes your voice on-device (when supported).
 ///
@@ -27,7 +29,14 @@ final class SpeechInput {
     var preferBuiltInMic = false
     /// Keeping the input open avoids hardware reconfiguration, but an open AirPods mic keeps
     /// them in mono headset mode, so only the built-in mic stays open between utterances.
-    var keepsInputOpen: Bool { preferBuiltInMic }
+    var keepsInputOpen: Bool {
+        #if os(iOS)
+        // iOS 26 full-bandwidth AirPods audio keeps playback in stereo with the mic open.
+        return AudioSession.highQualityMic || preferBuiltInMic
+        #else
+        return preferBuiltInMic
+        #endif
+    }
     private var openedAt = Date.distantPast
     /// The mic input is open (and, for AirPods, holding them in headset mode).
     var isInputOpen: Bool { engine != nil }
@@ -71,6 +80,7 @@ final class SpeechInput {
         shutdownInput()
         let e = AVAudioEngine()
         let input = e.inputNode
+        #if os(macOS)
         if preferBuiltInMic, let unit = input.audioUnit, var mic = Self.builtInMic() {
             let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
                                               &mic, UInt32(MemoryLayout<AudioDeviceID>.size))
@@ -78,6 +88,10 @@ final class SpeechInput {
         } else {
             inputName = "Default input"
         }
+        #else
+        AudioSession.preferBuiltInMic(preferBuiltInMic)
+        inputName = AudioSession.inputName
+        #endif
         // The hardware's real format after the device switch; the tap must match it exactly.
         let fmt = input.inputFormat(forBus: 0)
         guard fmt.sampleRate > 0, fmt.channelCount > 0 else {
@@ -163,6 +177,7 @@ final class SpeechInput {
         print("Agentsphere: mic closed")
     }
 
+    #if os(macOS)
     /// The Mac's built-in microphone, if it has one.
     static func builtInMic() -> AudioDeviceID? {
         var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices,
@@ -185,5 +200,5 @@ final class SpeechInput {
         }
         return nil
     }
-
+    #endif
 }
