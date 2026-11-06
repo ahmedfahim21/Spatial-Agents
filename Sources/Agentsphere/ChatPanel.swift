@@ -132,7 +132,7 @@ struct MessageRow: View {
             .padding(.horizontal, 10).padding(.vertical, 6)
             .background((st == .asking ? Color.purple : st == .approved ? Color.green : Color.red).opacity(0.1),
                         in: RoundedRectangle(cornerRadius: 8))
-        case .note:
+        case .note, .order:
             Text(message.text).font(.caption).foregroundStyle(.tertiary).frame(maxWidth: .infinity)
         case .error:
             Label(message.text, systemImage: "exclamationmark.triangle.fill")

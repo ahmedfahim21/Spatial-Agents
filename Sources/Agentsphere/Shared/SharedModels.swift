@@ -10,6 +10,8 @@ struct ChatMessage: Identifiable, Equatable {
         case permission(PermissionState)
         case note
         case error
+        /// A purchase a shop agent placed (phone app); its details live alongside the conversation.
+        case order
     }
     enum PermissionState: Equatable { case asking, approved, denied }
 
