@@ -15,6 +15,7 @@ struct EditAgentView: View {
     @State private var greeting: String
     @State private var context: String
     @State private var radius: Double
+    @State private var model: String
     /// Where it lives; nil = move it to where you are now.
     @State private var place: CLLocationCoordinate2D?
     @State private var acceptsPayments: Bool
@@ -35,6 +36,7 @@ struct EditAgentView: View {
         _greeting = State(initialValue: agent.greeting)
         _context = State(initialValue: agent.context ?? "")
         _radius = State(initialValue: agent.radiusM)
+        _model = State(initialValue: agent.model ?? ZGModel.defaultId)
         _place = State(initialValue: agent.coordinate)
         _acceptsPayments = State(initialValue: agent.pricing == "paid")
     }
@@ -54,6 +56,7 @@ struct EditAgentView: View {
                         ForEach(VoicePalette.voices, id: \.id) { Text($0.name).tag($0.id) }
                     }
                     .pickerStyle(.navigationLink)
+                    ModelRow(model: $model)
                 }
 
                 Section("Colour and shape") {
@@ -143,7 +146,8 @@ struct EditAgentView: View {
             context: context.trimmingCharacters(in: .whitespacesAndNewlines),
             lat: agent.isGeo ? spot?.latitude : nil,
             lng: agent.isGeo ? spot?.longitude : nil,
-            radiusM: radius
+            radiusM: radius,
+            model: model != (agent.model ?? ZGModel.defaultId) ? model : nil
         )
         // Payments: the menu as edited, empty to stop selling, or untouched if not loaded.
         let newMenu: [CatalogItem]? = sells && menuLoaded ? (acceptsPayments ? menu : []) : nil

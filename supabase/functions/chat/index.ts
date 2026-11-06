@@ -13,7 +13,7 @@ const MAX_CHARS = 2000;
 type Turn = { role: "user" | "assistant"; content: string };
 type AgentRow = {
   id: string; owner_id: string; name: string; anchor: string; visibility: string; greeting: string; context: string;
-  pricing: string; items: Item[];
+  pricing: string; model: string | null; items: Item[];
 };
 type Item = { id: string; name: string; note: string; price_usdc: number };
 const ORDER = /\[\[\s*order\s+item\s*=\s*(\d+)\s+qty\s*=\s*(\d+)\s*\]\]/i;
@@ -23,13 +23,15 @@ const agentCache = new Map<string, { row: AgentRow | null; at: number }>();
 async function loadAgent(db: ReturnType<typeof admin>, id: string): Promise<AgentRow | null> {
   const hit = agentCache.get(id);
   if (hit && Date.now() - hit.at < 30_000) return hit.row;
-  const { data, error } = await db
-    .from("agents")
-    .select("id, owner_id, name, anchor, visibility, greeting, context, pricing")
-    .eq("id", id)
-    .maybeSingle();
+  // `*` so this keeps working whether or not the `model` column exists yet.
+  const { data, error } = await db.from("agents").select("*").eq("id", id).maybeSingle();
   if (error) throw new Error(error.message);
-  let row: AgentRow | null = data ? { ...data, items: [] } : null;
+  let row: AgentRow | null = data
+    ? {
+      id: data.id, owner_id: data.owner_id, name: data.name, anchor: data.anchor, visibility: data.visibility,
+      greeting: data.greeting, context: data.context, pricing: data.pricing, model: data.model ?? null, items: [],
+    }
+    : null;
   if (row?.pricing === "paid" && row.visibility === "public") {
     const { data: items } = await db.from("catalog_items").select("id, name, note, price_usdc")
       .eq("agent_id", id).eq("active", true).order("position");
@@ -37,6 +39,31 @@ async function loadAgent(db: ReturnType<typeof admin>, id: string): Promise<Agen
   }
   agentCache.set(id, { row, at: Date.now() });
   return row;
+}
+
+// The router's chat models and what each accepts, refreshed hourly. An agent's model must
+// be on this list, or it falls back to the default.
+type ModelInfo = { params: string[] };
+let models: { at: number; byId: Map<string, ModelInfo> } | null = null;
+async function chatModels(): Promise<Map<string, ModelInfo>> {
+  if (models && Date.now() - models.at < 3_600_000) return models.byId;
+  try {
+    const r = await fetch("https://router-api.0g.ai/v1/models", { signal: AbortSignal.timeout(4000) });
+    const list: { id: string; type?: string; supported_parameters?: string[] }[] = (await r.json()).data ?? [];
+    const byId = new Map(list.filter((m) => m.type === "chatbot").map((m) => [m.id, { params: m.supported_parameters ?? [] }]));
+    if (byId.size) models = { at: Date.now(), byId };
+  } catch (e) {
+    console.error("0G model list", String(e));
+  }
+  return models?.byId ?? new Map();
+}
+
+/// The request body for one model. Spoken replies need the answer quickly, so models that
+/// can switch their "thinking" off get it off, and others get room to think before answering.
+function completion(model: string, info: ModelInfo | undefined, messages: unknown[]) {
+  const body: Record<string, unknown> = { model, stream: true, max_tokens: model === MODEL ? 400 : 1200, messages };
+  if (info?.params.includes("chat_template_kwargs")) body.chat_template_kwargs = { enable_thinking: false };
+  return body;
 }
 
 Deno.serve(async (req) => {
@@ -84,16 +111,26 @@ Deno.serve(async (req) => {
   const key = Deno.env.get("ZG_API_KEY");
   if (!key) return json({ error: "The server has no 0G API key configured" }, 500);
 
-  const upstream = await fetch(ROUTER, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-    body: JSON.stringify({
-      model: MODEL,
-      stream: true,
-      max_tokens: 400,
-      messages: [{ role: "system", content: systemPrompt(agent) }, ...turns],
-    }),
-  });
+  const messages = [{ role: "system", content: systemPrompt(agent) }, ...turns];
+  const ask = (model: string, info?: ModelInfo) =>
+    fetch(ROUTER, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify(completion(model, info, messages)),
+    });
+  let upstream: Response;
+  const wanted = agent.model && agent.model !== MODEL ? agent.model : null;
+  const info = wanted ? (await chatModels()).get(wanted) : undefined;
+  if (wanted && info) {
+    upstream = await ask(wanted, info);
+    // A model that's down or out of capacity shouldn't leave the agent speechless.
+    if (!upstream.ok && upstream.status !== 402) {
+      console.error("0G model failed, using default", wanted, upstream.status, (await upstream.text().catch(() => "")).slice(0, 300));
+      upstream = await ask(MODEL);
+    }
+  } else {
+    upstream = await ask(MODEL);
+  }
   mark("router_headers");
   if (!upstream.ok || !upstream.body) {
     const detail = await upstream.text().catch(() => "");

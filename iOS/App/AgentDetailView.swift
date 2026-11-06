@@ -38,6 +38,9 @@ struct AgentDetailView: View {
                         SectionLabel("About")
                         VStack(spacing: 0) {
                             row("Voice", VoicePalette.voices[agent.voiceIndex].name)
+                            if state.owns(agent.id) {
+                                RowDivider(); row("Model", ZGModel.displayName(agent.model))
+                            }
                             if !agent.isGeo {
                                 RowDivider(); windowRow(agent)
                             }

@@ -38,6 +38,7 @@ struct CreateView: View {
     @State private var acceptsPayments = false
     @State private var catalog = [CatalogDraft()]
     @State private var template: AgentTemplate?
+    @State private var model = ZGModel.defaultId
     /// Where a placed agent goes; nil = wherever you are when you tap Create.
     @State private var place: CLLocationCoordinate2D?
     @State private var picking = false
@@ -87,6 +88,7 @@ struct CreateView: View {
                         ForEach(VoicePalette.voices, id: \.id) { Text($0.name).tag($0.id) }
                     }
                     .pickerStyle(.navigationLink)
+                    ModelRow(model: $model)
                 }
 
                 Section("Colour and shape") {
@@ -230,7 +232,7 @@ struct CreateView: View {
     private func save() {
         let flavor = state.createFlavor
         let c = spot
-        let new = NewAgent(
+        var new = NewAgent(
             kind: flavor == .publicPlace ? .public : .personal,
             anchor: flavor == .withMe ? .body : .geo,
             visibility: flavor == .publicPlace ? .public : .private,
@@ -245,6 +247,7 @@ struct CreateView: View {
             lng: flavor.needsPlace ? c?.longitude : nil,
             radiusM: radius
         )
+        if model != ZGModel.defaultId { new.model = model }
         let items = selling ? menu : []
         field = nil
         saving = true

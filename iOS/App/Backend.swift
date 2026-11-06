@@ -103,6 +103,10 @@ final class Backend: @unchecked Sendable {
             lock.withLock { shapeColumn = false }
             agent.shape = nil
             data = try await rest("agents", method: "POST", body: try encoder.encode(agent), prefer: "return=representation")
+        } catch let error as BackendError where error.message.contains("'model'") && agent.model != nil {
+            // The database predates per-agent models (migration 20261107000000): use the default.
+            agent.model = nil
+            data = try await rest("agents", method: "POST", body: try encoder.encode(agent), prefer: "return=representation")
         }
         guard let created = try decoder.decode([Agent].self, from: data).first else {
             throw BackendError(message: "The agent wasn't saved")
@@ -121,11 +125,22 @@ final class Backend: @unchecked Sendable {
         var lat: Double?
         var lng: Double?
         var radiusM: Double
+        /// Only sent when it changed.
+        var model: String?
     }
 
     func update(_ id: UUID, _ changes: AgentChanges) async throws -> Agent {
-        let data = try await rest("agents?id=eq.\(id.uuidString)", method: "PATCH", body: try encoder.encode(changes),
+        var changes = changes
+        let data: Data
+        do {
+            data = try await rest("agents?id=eq.\(id.uuidString)", method: "PATCH", body: try encoder.encode(changes),
                                   prefer: "return=representation")
+        } catch let error as BackendError where error.message.contains("'model'") && changes.model != nil {
+            // The database predates per-agent models (migration 20261107000000).
+            changes.model = nil
+            data = try await rest("agents?id=eq.\(id.uuidString)", method: "PATCH", body: try encoder.encode(changes),
+                                  prefer: "return=representation")
+        }
         guard let updated = try decoder.decode([Agent].self, from: data).first else {
             throw BackendError(message: "The agent wasn't saved")
         }

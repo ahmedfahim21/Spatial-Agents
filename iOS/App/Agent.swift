@@ -31,6 +31,8 @@ struct Agent: Identifiable, Codable, Hashable {
     var distanceM: Double?
     /// The owner verified with World ID (nearby search only).
     var verified: Bool?
+    /// The 0G router chat model it thinks with (nil = the server default).
+    var model: String?
 
     var isGeo: Bool { anchor == .geo || (anchor == nil && lat != nil) }
     var isPublic: Bool { visibility == .public }
@@ -55,6 +57,8 @@ struct NewAgent: Encodable {
     var radiusM: Double
     var pricing = "free"
     var walletAddress: String?
+    /// Nil = the server default.
+    var model: String?
 }
 
 /// Voices agents can pick from: ElevenLabs premade voices (via the server), with a matching
