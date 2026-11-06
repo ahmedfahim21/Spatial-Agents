@@ -1,5 +1,8 @@
 // One conversational turn with a personal or public agent, through the 0G Compute Router.
 // Streams the reply back as SSE: `data: {"text": "..."}` chunks, then `data: [DONE]`.
+// Shop agents can also take an order: the model ends its reply with a hidden
+// `[[order item=<n> qty=<q>]]` line, which is never streamed; instead this asks the visitor's
+// wallet agent (the pay function) to pay, and sends `data: {"order": ...}` events.
 import { admin, caller, cors, json } from "../_shared/common.ts";
 
 const ROUTER = "https://router-api.0g.ai/v1/chat/completions";
@@ -8,7 +11,12 @@ const MAX_TURNS = 24;
 const MAX_CHARS = 2000;
 
 type Turn = { role: "user" | "assistant"; content: string };
-type AgentRow = { id: string; owner_id: string; name: string; anchor: string; visibility: string; greeting: string; context: string };
+type AgentRow = {
+  id: string; owner_id: string; name: string; anchor: string; visibility: string; greeting: string; context: string;
+  pricing: string; items: Item[];
+};
+type Item = { id: string; name: string; note: string; price_usdc: number };
+const ORDER = /\[\[\s*order\s+item\s*=\s*(\d+)\s+qty\s*=\s*(\d+)\s*\]\]/i;
 
 // Agents change rarely; keep them for 30 s per worker so a conversation doesn't hit the DB every turn.
 const agentCache = new Map<string, { row: AgentRow | null; at: number }>();
@@ -17,12 +25,18 @@ async function loadAgent(db: ReturnType<typeof admin>, id: string): Promise<Agen
   if (hit && Date.now() - hit.at < 30_000) return hit.row;
   const { data, error } = await db
     .from("agents")
-    .select("id, owner_id, name, anchor, visibility, greeting, context")
+    .select("id, owner_id, name, anchor, visibility, greeting, context, pricing")
     .eq("id", id)
     .maybeSingle();
   if (error) throw new Error(error.message);
-  agentCache.set(id, { row: data, at: Date.now() });
-  return data;
+  let row: AgentRow | null = data ? { ...data, items: [] } : null;
+  if (row?.pricing === "paid" && row.visibility === "public") {
+    const { data: items } = await db.from("catalog_items").select("id, name, note, price_usdc")
+      .eq("agent_id", id).eq("active", true).order("position");
+    row = { ...row, items: items ?? [] };
+  }
+  agentCache.set(id, { row, at: Date.now() });
+  return row;
 }
 
 Deno.serve(async (req) => {
@@ -101,6 +115,20 @@ Deno.serve(async (req) => {
       let buffer = "";
       const send = (s: string) => controller.enqueue(encoder.encode(s));
       let firstText = true;
+      // Text from "[[" on is an order marker: held back, never spoken. A lone trailing "["
+      // waits for the next chunk to tell.
+      let held = "";
+      let marker = "";
+      const emit = (text: string) => {
+        if (marker) { marker += text; return; }
+        held += text;
+        const at = held.indexOf("[[");
+        let out: string;
+        if (at >= 0) { out = held.slice(0, at); marker = held.slice(at); held = ""; }
+        else if (held.endsWith("[")) { out = held.slice(0, -1); held = "["; }
+        else { out = held; held = ""; }
+        if (out) send(`data: ${JSON.stringify({ text: out })}\n\n`);
+      };
       try {
         while (true) {
           const { value, done } = await reader.read();
@@ -117,7 +145,7 @@ Deno.serve(async (req) => {
               const text = JSON.parse(payload).choices?.[0]?.delta?.content;
               if (text) {
                 if (firstText) { firstText = false; mark("first_token"); }
-                send(`data: ${JSON.stringify({ text })}\n\n`);
+                emit(text);
               }
             } catch { /* keep-alive or partial line */ }
           }
@@ -125,7 +153,19 @@ Deno.serve(async (req) => {
       } catch (e) {
         send(`data: ${JSON.stringify({ error: String(e) })}\n\n`);
       }
+      if (held) send(`data: ${JSON.stringify({ text: held })}\n\n`);
       mark("done");
+      const order = agent!.items.length ? marker.match(ORDER) : null;
+      const item = order ? agent!.items[Number(order[1]) - 1] : undefined;
+      if (item) {
+        const qty = Math.min(20, Math.max(1, Number(order![2])));
+        const amount = Math.round(Number(item.price_usdc) * qty * 100) / 100;
+        send(`data: ${JSON.stringify({ order: { status: "paying", item_name: item.name, qty, amount_usdc: amount } })}\n\n`);
+        send(`data: ${JSON.stringify({ order: await placeOrder(req, agent!.id, item.id, qty) })}\n\n`);
+        mark("order");
+      } else if (marker) {
+        console.warn("chat: unusable order marker", marker.slice(0, 80));
+      }
       console.log("chat timing", JSON.stringify(marks));
       send(`data: ${JSON.stringify({ timing: marks })}\n\n`);
       send("data: [DONE]\n\n");
@@ -135,6 +175,41 @@ Deno.serve(async (req) => {
   return new Response(stream, { headers: { ...cors, "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } });
 });
 
+/** Has the visitor's wallet agent pay the shop, as the visitor (same session token). */
+async function placeOrder(req: Request, agentId: string, itemId: string, qty: number): Promise<Record<string, unknown>> {
+  try {
+    const r = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/pay`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: req.headers.get("Authorization") ?? "",
+        apikey: req.headers.get("apikey") ?? "",
+      },
+      body: JSON.stringify({ agent_id: agentId, item_id: itemId, qty }),
+    });
+    const body = await r.json().catch(() => ({}));
+    return body.status ? body : { status: "failed", error: body.error ?? `Payment failed (${r.status})` };
+  } catch (e) {
+    console.error("chat: pay failed", String(e));
+    return { status: "failed", error: "Couldn't reach your wallet." };
+  }
+}
+
+function menu(items: Item[]): string {
+  const lines = items.map((it, i) =>
+    `${i + 1}. ${it.name}, $${Number(it.price_usdc).toFixed(2)}${it.note ? ` (${it.note})` : ""}`
+  );
+  return [
+    "You run a shop and take payment in USDC through the visitor's wallet. The menu:",
+    ...lines,
+    "When, in their latest message, the visitor clearly asks to buy something on the menu, confirm it in " +
+    "one short sentence and then end your reply with exactly one line `[[order item=<menu number> qty=<count>]]`. " +
+    "That line is hidden and places the order; their wallet pays, and asks them to approve large amounts. " +
+    "Never write it otherwise: not for questions, maybes, or anything already ordered. Never invent items or prices. " +
+    "Don't say the payment went through; the app tells them.",
+  ].join("\n");
+}
+
 function systemPrompt(a: AgentRow): string {
   const where = a.anchor === "geo"
     ? "You live at a real place; people walk up to you and talk to you through their AirPods."
@@ -143,6 +218,7 @@ function systemPrompt(a: AgentRow): string {
     `You are ${a.name}, an agent in Agentsphere. ${where}`,
     a.context ? `What you know and how you behave:\n${a.context}` : "",
     a.greeting ? `You introduced yourself with: "${a.greeting}"` : "",
+    a.items.length ? menu(a.items) : "",
     "Your replies are spoken aloud. Keep them to one to three short sentences, conversational, " +
     "with no markdown, lists, links, or emoji. If you don't know something, say so briefly.",
   ].filter(Boolean).join("\n\n");
