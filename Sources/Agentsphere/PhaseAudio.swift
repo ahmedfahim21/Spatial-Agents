@@ -17,6 +17,63 @@ protocol AgentAudio: AnyObject {
     /// A short sound from the agent's position, played immediately.
     func cue(_ cue: AudioCue, from id: UUID)
     var onSpeakingChanged: ((Bool) -> Void)? { get set }
+    /// Called on the main queue before an agent starts a line. Returns true if it just closed
+    /// the AirPods mic, so playback waits for them to switch back to stereo.
+    var beforeSpeaking: (() -> Bool)? { get set }
+}
+
+/// Holds an agent's audio until the output is ready (e.g. AirPods finishing a switch out of
+/// headset mode), so nothing is scheduled into a route that's about to be torn down.
+/// Synthesis keeps streaming in the meantime, so the wait mostly overlaps TTS latency.
+final class PlaybackGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isOpen: Bool
+    private var held: [AVAudioPCMBuffer] = []
+    private var seconds: Double = 0
+    private let play: (AVAudioPCMBuffer) -> Void
+
+    init(open: Bool, play: @escaping (AVAudioPCMBuffer) -> Void) {
+        isOpen = open
+        self.play = play
+    }
+
+    /// Total audio submitted, in seconds.
+    var totalSeconds: Double { lock.withLock { seconds } }
+
+    func submit(_ b: AVAudioPCMBuffer) {
+        let playNow = lock.withLock { () -> Bool in
+            seconds += Double(b.frameLength) / b.format.sampleRate
+            if !isOpen { held.append(b) }
+            return isOpen
+        }
+        if playNow { play(b) }
+    }
+
+    func open() {
+        let flush = lock.withLock { () -> [AVAudioPCMBuffer] in
+            isOpen = true
+            defer { held = [] }
+            return held
+        }
+        flush.forEach(play)
+    }
+}
+
+/// Waits for a playback callback, but never longer than `timeout`: if the engine restarts
+/// mid-line the callback can be lost, and an agent's speech queue must never hang on it.
+func waitForPlayback(timeout: Double, _ schedule: (@escaping @Sendable () -> Void) -> Void) async {
+    await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+        let once = OnceFlag()
+        let finish: @Sendable () -> Void = { if once.claim() { c.resume() } }
+        schedule(finish)
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: finish)
+    }
+}
+
+final class OnceFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+    func claim() -> Bool { lock.withLock { defer { done = true }; return !done } }
 }
 
 extension AgentAudio {
@@ -140,6 +197,7 @@ final class PhaseAgentAudio: AgentAudio {
 
     /// Called on the main queue when agents start or stop talking (any agent).
     var onSpeakingChanged: ((Bool) -> Void)?
+    var beforeSpeaking: (() -> Bool)?
     private var speakingCount = 0
     private func speakingDelta(_ d: Int) {
         DispatchQueue.main.async {
@@ -205,23 +263,29 @@ final class PhaseAgentAudio: AgentAudio {
             guard let self, !Task.isCancelled else { return }
             self.speakingDelta(1)
             defer { self.speakingDelta(-1) }
-            if let preludeBuffer { stream.scheduleBuffer(buffer: preludeBuffer) }
+            let releasedMic = await MainActor.run { self.beforeSpeaking?() ?? false }
+            let gate = PlaybackGate(open: !releasedMic) { stream.scheduleBuffer(buffer: $0) }
+            // PHASE follows the device switch itself; just give the AirPods time to settle.
+            let settle = Task {
+                if releasedMic { try? await Task.sleep(nanoseconds: 900_000_000) }
+                gate.open()
+            }
+            if let preludeBuffer { gate.submit(preludeBuffer) }
             var converter: AVAudioConverter?
-            var scheduled = preludeBuffer != nil
             await self.voices.speak(text, voiceIndex: a.voiceIndex) { pcm in
                 guard pcm.frameLength > 0 else { return }
                 if converter == nil || converter?.inputFormat != pcm.format {
                     converter = AVAudioConverter(from: pcm.format, to: target)
                 }
                 guard let conv = converter, let out = AudioConvert.convert(pcm, with: conv, to: target) else { return }
-                stream.scheduleBuffer(buffer: out)
-                scheduled = true
+                gate.submit(out)
             }
-            // Hold the queue until this line has been rendered.
-            if scheduled, let marker = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: 1) {
+            await settle.value
+            // Hold the queue until this line has been rendered (bounded, so it can't hang).
+            if gate.totalSeconds > 0, let marker = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: 1) {
                 marker.frameLength = 1
-                await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-                    stream.scheduleBuffer(buffer: marker, completionCallbackType: .dataRendered) { _ in c.resume() }
+                await waitForPlayback(timeout: gate.totalSeconds + 3) { done in
+                    stream.scheduleBuffer(buffer: marker, completionCallbackType: .dataRendered) { _ in done() }
                 }
             }
         }

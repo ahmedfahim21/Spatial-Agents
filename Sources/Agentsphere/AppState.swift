@@ -373,6 +373,7 @@ final class AppState: ObservableObject {
     private var listenStartedAt = Date()
     private var dwellWork: DispatchWorkItem?
     private var sendWork: DispatchWorkItem?
+    private var micReleaseWork: DispatchWorkItem?
 
     private func wireAudio() {
         audio.onSpeakingChanged = { [weak self] speaking in
@@ -382,6 +383,18 @@ final class AppState: ObservableObject {
             if speaking, self.handsFreeActive, self.utteranceTarget == nil { self.stopListening() }
             if !speaking { self.scheduleHandsFree() }
         }
+        audio.beforeSpeaking = { [weak self] in self?.releaseMicForSpeech() ?? false }
+    }
+
+    /// Agents speak in stereo: close the AirPods mic before a line (unless you're mid-sentence).
+    /// Returns true if it was open, so playback waits for the AirPods to switch back.
+    private func releaseMicForSpeech() -> Bool {
+        guard utteranceTarget == nil else { return false }
+        if handsFreeActive { stopListening() }
+        guard !speech.keepsInputOpen, speech.isInputOpen else { return false }
+        micReleaseWork?.cancel()
+        speech.shutdown()
+        return true
     }
 
     /// When the current agent got focus; the listening beep lands ~1 s after this.
@@ -407,6 +420,8 @@ final class AppState: ObservableObject {
 
     private func startHandsFree() {
         guard handsFree, let id = focusedId, !isListening, !agentsSpeaking, pendingSend == nil, !showDiscover else { return }
+        micReleaseWork?.cancel()
+        let micWasOpen = speech.isInputOpen
         speech.begin { [weak self] error in
             guard let self else { return }
             if let error {
@@ -426,7 +441,7 @@ final class AppState: ObservableObject {
             // "I'm listening" beep about 1 s after you turned to the agent, and at least
             // 0.5 s after the AirPods mic opened so the headset switch has settled.
             let sinceFocus = Date().timeIntervalSince(self.focusedAt)
-            let settle = self.speech.keepsInputOpen ? 0.0 : 0.5
+            let settle = self.speech.keepsInputOpen || micWasOpen ? 0.0 : 0.5
             let delay = max(1.0 - sinceFocus, settle)
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self, self.handsFreeActive, self.listeningTarget == id else { return }
@@ -486,9 +501,18 @@ final class AppState: ObservableObject {
         scheduleHandsFree()
     }
 
-    /// The AirPods mic keeps them in mono headset mode, so close it whenever we're not listening.
-    private func releaseMicIfNeeded() {
-        if !speech.keepsInputOpen { speech.shutdown() }
+    /// The AirPods mic keeps them in mono headset mode, so close it when we're not listening;
+    /// but linger a few seconds so glancing between agents doesn't flip modes back and forth
+    /// (each flip restarts the audio output).
+    private func releaseMicIfNeeded(after delay: Double = 4) {
+        guard !speech.keepsInputOpen else { return }
+        micReleaseWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.isListening else { return }
+            self.speech.shutdown()
+        }
+        micReleaseWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     private func stopListening() {

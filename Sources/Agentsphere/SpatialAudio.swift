@@ -16,9 +16,13 @@ final class SpatialAudio: AgentAudio {
     private var speechTail: [UUID: Task<Void, Never>] = [:]
     let voices: VoiceRouter
     private var restartWork: DispatchWorkItem?
+    private var recoverAttempts = 0
+    private var lastConfigChange = Date.distantPast
+    private var watchdog: Timer?
 
     /// Called on the main queue when agents start or stop talking (any agent).
     var onSpeakingChanged: ((Bool) -> Void)?
+    var beforeSpeaking: (() -> Bool)?
     private var speakingCount = 0
     private func speakingDelta(_ d: Int) {
         DispatchQueue.main.async {
@@ -40,26 +44,82 @@ final class SpatialAudio: AgentAudio {
         environment.distanceAttenuationParameters.referenceDistance = 1
         environment.reverbParameters.enable = false
         startEngine()
-        // macOS stops the engine when the output device changes; bring the agents' voices back.
-        // These arrive in bursts; restart once, and only if the engine actually stopped.
+        // macOS stops the engine when the output changes (AirPods switching in and out of
+        // headset mode, 44.1 ↔ 48 kHz). Changes come in bursts: recover once things settle.
         NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
             guard let self else { return }
-            self.restartWork?.cancel()
-            let work = DispatchWorkItem { [weak self] in
-                guard let self, !self.engine.isRunning else { return }
-                print("Agentsphere: audio output changed; restarting engine")
-                self.startEngine()
-                for p in self.players.values { p.play() }
-            }
-            self.restartWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+            self.lastConfigChange = Date()
+            self.recoverAttempts = 0
+            self.scheduleRecover(after: 0.4)
         }
+        // Belt and braces: if the engine is down and no notification came, bring it back.
+        let timer = Timer(timeInterval: 1.5, repeats: true) { [weak self] _ in
+            guard let self, !self.engine.isRunning, self.restartWork == nil, !self.players.isEmpty else { return }
+            self.scheduleRecover(after: 0)
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        watchdog = timer
     }
+
+    deinit { watchdog?.invalidate() }
 
     private func startEngine() {
         guard !engine.isRunning else { return }
         engine.prepare()
         do { try engine.start() } catch { print("Agentsphere audio engine error: \(error)") }
+    }
+
+    private func scheduleRecover(after delay: Double) {
+        restartWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.restartWork = nil
+            self?.recover()
+        }
+        restartWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// Restarts the engine against the current output, retrying with backoff until it runs.
+    private func recover() {
+        if engine.isRunning {
+            recoverAttempts = 0
+            for p in players.values where !p.isPlaying { p.play() }
+            return
+        }
+        recoverAttempts += 1
+        print("Agentsphere: audio output changed; restarting engine (attempt \(recoverAttempts))")
+        engine.stop()
+        // The hardware sample rate may have changed; reconnect the final stage to match it.
+        let hw = engine.outputNode.outputFormat(forBus: 0)
+        engine.connect(engine.mainMixerNode, to: engine.outputNode, format: hw.sampleRate > 0 ? hw : nil)
+        startEngine()
+        if engine.isRunning {
+            for p in players.values { p.play() }
+            print("Agentsphere: audio engine running (\(Int(hw.sampleRate)) Hz)")
+        } else if recoverAttempts < 10 {
+            scheduleRecover(after: min(0.4 * Double(recoverAttempts), 3))
+        } else {
+            print("Agentsphere: audio engine failed to restart; the watchdog will keep trying")
+            recoverAttempts = 0
+        }
+    }
+
+    /// After the AirPods mic closes, wait for them to finish switching back to stereo.
+    private func waitForStableOutput() async {
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline {
+            let ready = await MainActor.run { self.engine.isRunning && Date().timeIntervalSince(self.lastConfigChange) > 0.6 }
+            if ready { return }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+    }
+
+    /// Schedules a buffer, starting the player only when the engine runs
+    /// (playing a node on a stopped engine raises an exception).
+    private func enqueue(_ buffer: AVAudioPCMBuffer, on player: AVAudioPlayerNode) {
+        player.scheduleBuffer(buffer, completionHandler: nil)
+        if engine.isRunning, !player.isPlaying { player.play() }
     }
 
     // MARK: - Sources
@@ -77,7 +137,7 @@ final class SpatialAudio: AgentAudio {
         azimuths[id] = azimuth
         self.voiceIndex[id] = voiceIndex
         startEngine()
-        player.play()
+        if engine.isRunning { player.play() }
         updatePositions()
     }
 
@@ -125,12 +185,15 @@ final class SpatialAudio: AgentAudio {
             guard let self, !Task.isCancelled else { return }
             self.speakingDelta(1)
             defer { self.speakingDelta(-1) }
-            // The prelude (e.g. reply chime) plays while the voice is still being synthesized.
-            var last: AVAudioPCMBuffer?
-            if let preludeBuffer {
-                Self.enqueue(preludeBuffer, on: player)
-                last = preludeBuffer
+            // If this line closed the AirPods mic, hold playback until they're back in stereo.
+            let releasedMic = await MainActor.run { self.beforeSpeaking?() ?? false }
+            let gate = PlaybackGate(open: !releasedMic) { [weak self] in self?.enqueue($0, on: player) }
+            let settle = Task {
+                if releasedMic { await self.waitForStableOutput() }
+                gate.open()
             }
+            // The prelude (e.g. reply chime) plays while the voice is still being synthesized.
+            if let preludeBuffer { gate.submit(preludeBuffer) }
             let box = ConverterBox()
             await self.voices.speak(text, voiceIndex: index) { pcm in
                 guard pcm.frameLength > 0 else { return }
@@ -138,38 +201,30 @@ final class SpatialAudio: AgentAudio {
                     box.converter = AVAudioConverter(from: pcm.format, to: target)
                 }
                 guard let conv = box.converter, let out = self.convert(pcm, with: conv) else { return }
-                player.scheduleBuffer(out, completionHandler: nil)
-                if !player.isPlaying { player.play() }
-                last = out
+                gate.submit(out)
             }
-            // Hold the queue until this line finishes playing.
-            if let last {
-                await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-                    player.scheduleBuffer(AVAudioPCMBuffer(pcmFormat: last.format, frameCapacity: 1)!, completionCallbackType: .dataPlayedBack) { _ in c.resume() }
+            await settle.value
+            // Hold the queue until this line finishes playing (bounded, so it can't hang).
+            if gate.totalSeconds > 0, let marker = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: 1) {
+                marker.frameLength = 1
+                await waitForPlayback(timeout: gate.totalSeconds + 3) { done in
+                    player.scheduleBuffer(marker, completionCallbackType: .dataPlayedBack) { _ in done() }
                 }
             }
         }
     }
 
-    /// A short tone from the agent's position. `high` for "sent", low for "you're facing me".
-    /// Fire-and-forget scheduling (kept synchronous so async callers don't wait for playback).
-    private static func enqueue(_ buffer: AVAudioPCMBuffer, on player: AVAudioPlayerNode) {
-        player.scheduleBuffer(buffer, completionHandler: nil)
-        if !player.isPlaying { player.play() }
-    }
-
     func cue(_ cue: AudioCue, from id: UUID) {
         guard let player = players[id], let buf = AudioConvert.cue(cue, format: format) else { return }
         startEngine()
-        player.scheduleBuffer(buf, completionHandler: nil)
-        if !player.isPlaying { player.play() }
+        enqueue(buf, on: player)
     }
 
+    /// A short tone from the agent's position. `high` for "sent", low for "you're facing me".
     func ping(from id: UUID, high: Bool) {
         guard let player = players[id], let tone = makeTone(frequency: high ? 990 : 660) else { return }
         startEngine()
-        player.scheduleBuffer(tone, completionHandler: nil)
-        if !player.isPlaying { player.play() }
+        enqueue(tone, on: player)
     }
 
     private func makeTone(frequency: Double, duration: Double = 0.12) -> AVAudioPCMBuffer? {

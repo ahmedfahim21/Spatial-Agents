@@ -29,6 +29,8 @@ final class SpeechInput {
     /// them in mono headset mode, so only the built-in mic stays open between utterances.
     var keepsInputOpen: Bool { preferBuiltInMic }
     private var openedAt = Date.distantPast
+    /// The mic input is open (and, for AirPods, holding them in headset mode).
+    var isInputOpen: Bool { engine != nil }
     private(set) var inputName = "Default input"
 
     /// Called on the main queue with the running transcript.
