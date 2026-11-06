@@ -111,7 +111,8 @@ async function purchase(db: ReturnType<typeof admin>, uid: string, body: Body, l
       return json({
         status: "checkpoint",
         approval: {
-          id: approval.id, item_name: item.name, qty, amount_usdc: amount, expires_at: approval.expires_at,
+          id: approval.id, agent_id: body.agent_id, item_id: item.id, item_name: item.name, qty, amount_usdc: amount,
+          expires_at: approval.expires_at,
           reason: overLimit ? `Over your $${limits.auto_limit_usdc.toFixed(2)} limit` : `Over today's $${limits.daily_budget_usdc.toFixed(2)} budget`,
         },
       });
