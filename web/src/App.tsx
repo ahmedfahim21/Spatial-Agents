@@ -29,16 +29,16 @@ function Reveal({ children, className = "" }: { children: ReactNode; className?:
   return <div ref={box} className={`reveal ${seen ? "seen" : ""} ${className}`}>{children}</div>;
 }
 
-function Section({ id, tone, label, title, intro, children }: { id: string; tone: "white" | "grey"; label: string; title: string; intro: string; children: ReactNode }) {
+function Section({ id, tone, label, title, intro, compact = false, children }: { id: string; tone: "white" | "grey"; label: string; title: string; intro: string; compact?: boolean; children: ReactNode }) {
   return (
-    <section id={id} className={`tone-${tone} overflow-hidden px-4 py-24 sm:px-6 sm:py-36`}>
+    <section id={id} className={`tone-${tone} overflow-hidden px-4 sm:px-6 ${compact ? "py-16 lg:py-10" : "py-24 sm:py-36"}`}>
       <div className="mx-auto max-w-6xl">
-        <Reveal className="mx-auto max-w-3xl text-center">
-          <p className="text-[17px] text-secondary sm:text-[19px]">{label}</p>
-          <h2 className="mt-2 text-[40px] leading-[1.07] tracking-[-0.022em] text-balance sm:text-[64px]">{title}</h2>
-          <p className="mx-auto mt-5 max-w-2xl text-[19px] leading-[1.45] text-secondary text-pretty sm:text-[21px]">{intro}</p>
+        <Reveal className={`mx-auto text-center ${compact ? "max-w-4xl" : "max-w-3xl"}`}>
+          <p className={`text-secondary ${compact ? "text-[15px]" : "text-[17px] sm:text-[19px]"}`}>{label}</p>
+          <h2 className={`mt-1 leading-[1.07] tracking-[-0.022em] text-balance ${compact ? "text-[34px] sm:text-[44px]" : "text-[40px] sm:text-[64px]"}`}>{title}</h2>
+          <p className={`mx-auto text-secondary text-pretty ${compact ? "mt-2 max-w-3xl text-[17px] leading-[1.4]" : "mt-5 max-w-2xl text-[19px] leading-[1.45] sm:text-[21px]"}`}>{intro}</p>
         </Reveal>
-        <Reveal className="mt-14 sm:mt-20">{children}</Reveal>
+        <Reveal className={compact ? "mt-8 lg:mt-6" : "mt-14 sm:mt-20"}>{children}</Reveal>
       </div>
     </section>
   );
@@ -236,19 +236,21 @@ export function App() {
         <IPhoneSection />
         <Section
           id="shops"
+          compact
           tone="grey"
           label="Agent shops"
           title="Order out loud. Your wallet agent pays."
-          intro="A public agent can run a shop with its own Hedera wallet. Your wallet agent pays it in USDC over x402, and you only step in when the amount is large. Order something, then try the coffee beans."
+          intro="Shop agents have their own Hedera wallet. Yours pays them in USDC over x402, and you only step in for large amounts. Tap the menu, then try the coffee beans."
         >
           <Payments />
         </Section>
         <Section
           id="built"
+          compact
           tone="white"
           label="How it's built"
           title="Follow a request through the system."
-          intro="Native Apple audio and motion on the device, with a thin backend for models, voices and payments. Pick a journey, step through it, or click any box."
+          intro="Native audio and motion on the device, with a thin backend for models, voices and payments. Pick a journey, or click any box."
         >
           <Architecture />
         </Section>

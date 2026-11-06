@@ -30,7 +30,7 @@ function Wallet({ who, balance, bot }: { who: string; balance: number; bot: Reac
     <div className="flex flex-col items-center gap-1.5 text-center">
       {bot}
       <p className="text-[13px] text-secondary">{who}</p>
-      <p className="text-[22px] tabular-nums tracking-tight">{balance.toFixed(2)}</p>
+      <p className="text-[20px] tabular-nums tracking-tight">{balance.toFixed(2)}</p>
       <p className="-mt-1.5 text-[11px] text-secondary">USDC</p>
     </div>
   );
@@ -97,8 +97,8 @@ export function Payments() {
   const moving = stage === "paying" && at >= 2;
 
   return (
-    <div ref={box} className="grid items-start justify-items-center gap-8 lg:grid-cols-[auto_1fr] lg:justify-items-stretch">
-      <Phone width={290} background="#fff">
+    <div ref={box} className="grid items-center justify-items-center gap-6 lg:grid-cols-[auto_1fr] lg:justify-items-stretch">
+      <Phone width={236} background="#fff">
         <div className="flex h-full flex-col">
           <Speaking agent={{ color: "orange", shape: "drop" }} label="Corner Café" />
           <div className="flex flex-1 flex-col justify-end gap-2 overflow-hidden px-3">
@@ -140,12 +140,12 @@ export function Payments() {
         </div>
       </Phone>
 
-      <div className="grid w-full min-w-0 gap-4 md:grid-cols-2">
-        <div className="rounded-[28px] bg-[var(--tile)] p-6">
+      <div className="grid w-full min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="rounded-[28px] bg-[var(--tile)] p-5">
           <p className="flex items-center gap-1.5 text-[13px] text-secondary"><ShoppingBag size={13} /> Menu. Tap to order.</p>
           <div className="mt-2 divide-y divide-separator/50">
             {menu.map((m) => (
-              <button key={m.name} type="button" onClick={() => order(m)} className="pressable flex w-full cursor-pointer items-center justify-between py-2.5 text-[15px]">
+              <button key={m.name} type="button" onClick={() => order(m)} className="pressable flex w-full cursor-pointer items-center justify-between py-2 text-[15px]">
                 <span className="flex items-center gap-2">
                   {m.name}
                   {m === item && <span className="size-1.5 rounded-full bg-ink" />}
@@ -156,7 +156,7 @@ export function Payments() {
           </div>
         </div>
 
-        <div className="space-y-4 rounded-[28px] bg-[var(--tile)] p-6">
+        <div className="space-y-4 rounded-[28px] bg-[var(--tile)] p-5">
           <p className="text-[13px] text-secondary">Your limits</p>
           <Meter label="This purchase" used={item.price} of={perPurchase} />
           <Meter label="Today" used={paid ? item.price : 0} of={dailyBudget} />
@@ -165,7 +165,7 @@ export function Payments() {
           </p>
         </div>
 
-        <div className="rounded-[28px] bg-[var(--tile)] p-6 md:col-span-2">
+        <div className="rounded-[28px] bg-[var(--tile)] p-5 md:col-span-2 xl:col-span-3 xl:order-last">
           <div className="grid grid-cols-[auto_1fr_auto] items-center gap-4">
             <Wallet who="Wallet agent" balance={buyer} bot={<span className="flex size-11 items-center justify-center rounded-full bg-ink text-[15px] text-white">$</span>} />
             <div className="relative h-px bg-separator">
@@ -178,7 +178,7 @@ export function Payments() {
             </div>
             <Wallet who="Corner Café" balance={shop} bot={<Bot color="orange" shape="drop" size={44} mood={paid ? "awake" : "idle"} />} />
           </div>
-          <ol className="mt-5 grid gap-2 sm:grid-cols-4">
+          <ol className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
             {wire.map(([code, what], i) => (
               <li key={code} className={`rounded-2xl p-3 transition-colors duration-300 ${at >= i ? "bg-ink text-white" : "bg-[#f5f5f7] text-secondary"}`}>
                 <p className="break-words font-mono text-[11px] leading-4">{code}</p>
@@ -188,11 +188,11 @@ export function Payments() {
           </ol>
         </div>
 
-        <div className="rounded-[28px] bg-[var(--tile)] p-6 md:col-span-2">
+        <div className="rounded-[28px] bg-[var(--tile)] p-5 md:col-span-2 xl:col-span-1">
           <p className="text-[13px] text-secondary">Corner Café's sales</p>
           <div className="mt-1 divide-y divide-separator/50">
             {paid && (
-              <div key={run} className="rise flex items-center justify-between py-2.5">
+              <div key={run} className="rise flex items-center justify-between py-2">
                 <div>
                   <p className="text-[15px]">{item.name}</p>
                   <p className="flex items-center gap-1 text-[12px] text-secondary">
@@ -203,7 +203,7 @@ export function Payments() {
                 <span className="tabular-nums">{usd(item.price)}</span>
               </div>
             )}
-            <div className="flex items-center justify-between py-2.5">
+            <div className="flex items-center justify-between py-2">
               <div>
                 <p className="text-[15px]">2 × Croissant</p>
                 <p className="text-[12px] text-secondary">Yesterday</p>

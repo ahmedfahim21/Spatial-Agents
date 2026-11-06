@@ -1,3 +1,4 @@
+import { ArrowRight } from "lucide-react";
 import { useEffect, useState } from "react";
 
 type Node = { x: number; y: number; label: string; note: string; where: string };
@@ -69,7 +70,7 @@ const flows: { name: string; steps: Step[] }[] = [
 
 const columns: [number, string][] = [[90, "You"], [300, "Devices"], [540, "Agent and backend"], [780, "Services"], [1010, "Ledger"]];
 const w = 150;
-const h = 54;
+const h = 60;
 
 /** Where a line between two nodes meets the edge of each box. */
 function edge(from: Node, to: Node) {
@@ -103,7 +104,7 @@ export function Architecture() {
   const info = nodes[picked ?? to];
 
   return (
-    <div className="rounded-[28px] bg-[var(--tile)] p-4 sm:p-8">
+    <div className="rounded-[28px] bg-[var(--tile)] p-4 sm:p-6">
       <div className="flex flex-wrap gap-2" role="tablist">
         {flows.map((f, i) => (
           <button
@@ -119,15 +120,21 @@ export function Architecture() {
         ))}
       </div>
 
-      <div className="shelf mt-4 overflow-x-auto">
-        <svg viewBox="0 0 1100 610" className="w-full min-w-[680px]" role="group" aria-label={`Diagram: ${flows[flow].name}`}>
+      <div className="mt-4 grid items-start gap-4 lg:grid-cols-[1.65fr_1fr]">
+      <div className="flex items-center justify-center gap-2 rounded-2xl bg-white p-4 text-[15px] md:hidden">
+        <span className="rounded-xl bg-ink px-3 py-2 text-white">{nodes[from].label}</span>
+        <ArrowRight size={18} aria-hidden />
+        <span className="rounded-xl bg-ink px-3 py-2 text-white">{nodes[to].label}</span>
+      </div>
+      <div className="hidden md:block">
+        <svg viewBox="0 0 1100 610" className="w-full" role="group" aria-label={`Diagram: ${flows[flow].name}`}>
           <defs>
             <marker id="tip" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
               <path d="M0 0 L10 5 L0 10z" fill="#000" />
             </marker>
           </defs>
           {columns.map(([x, name]) => (
-            <text key={name} x={x} y="16" textAnchor="middle" fontSize="13" fill="#6c6c70">{name}</text>
+            <text key={name} x={x} y="16" textAnchor="middle" fontSize="17" fill="#6e6e73">{name}</text>
           ))}
           {steps.map(([a, b], i) => {
             const l = edge(nodes[a], nodes[b]);
@@ -161,14 +168,14 @@ export function Architecture() {
                   strokeWidth="3"
                   style={{ transition: "fill 200ms" }}
                 />
-                <text x={n.x} y={n.y + 6} textAnchor="middle" fontSize="17" fill={live ? "#fff" : "#000"} style={{ transition: "fill 200ms" }}>{n.label}</text>
+                <text x={n.x} y={n.y + 7} textAnchor="middle" fontSize="21" fill={live ? "#fff" : "#000"} style={{ transition: "fill 200ms" }}>{n.label}</text>
               </g>
             );
           })}
         </svg>
       </div>
 
-      <div className="mt-4 grid gap-4 md:grid-cols-[1.3fr_1fr]">
+      <div className="min-w-0 space-y-3">
         <ol className="space-y-0.5">
           {steps.map(([, , text], i) => (
             <li key={text + i}>
@@ -188,6 +195,7 @@ export function Architecture() {
           <p className="mt-1 text-[14px] leading-5 text-secondary">{info.note}</p>
           <p className="mt-2 break-words font-mono text-[12px] text-secondary">{info.where}</p>
         </div>
+      </div>
       </div>
     </div>
   );
