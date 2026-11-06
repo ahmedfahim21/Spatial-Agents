@@ -37,6 +37,7 @@ struct CreateView: View {
     @State private var radius = 25.0
     @State private var acceptsPayments = false
     @State private var catalog = [CatalogDraft()]
+    @State private var template: AgentTemplate?
     /// Where a placed agent goes; nil = wherever you are when you tap Create.
     @State private var place: CLLocationCoordinate2D?
     @State private var picking = false
@@ -51,6 +52,12 @@ struct CreateView: View {
         let flavor = state.createFlavor
         NavigationStack {
             Form {
+                Section {
+                    TemplatePicker(selected: template) { apply($0) }
+                        .listRowInsets(EdgeInsets(top: 0, leading: -20, bottom: 0, trailing: -20))
+                        .listRowBackground(Color.clear)
+                } header: { Text("Start from") }
+
                 Section {
                     Picker("Type", selection: $state.createFlavor) {
                         ForEach(AgentFlavor.allCases) { Text($0.rawValue).tag($0) }
@@ -147,6 +154,28 @@ struct CreateView: View {
                 PlacePicker(start: spot, color: color, shape: shape) { place = $0 }
             }
         }
+    }
+
+    // MARK: Templates
+
+    /// Fills the form from a template. A name you typed yourself is kept.
+    private func apply(_ t: AgentTemplate) {
+        withAnimation(Motion.snappy) {
+            if name.isEmpty || name == template?.name { name = t.name }
+            template = t
+            state.createFlavor = t.flavor
+            greeting = t.greeting
+            context = t.context
+            color = t.color
+            shape = t.shape
+            voice = t.voice
+            radius = t.radius
+            if !t.menu.isEmpty {
+                acceptsPayments = true
+                catalog = t.menu.map { var d = CatalogDraft(); d.name = $0.0; d.price = $0.1; return d }
+            }
+        }
+        state.haptics.tap(intensity: 0.5, sharpness: 0.5)
     }
 
     // MARK: Pieces
