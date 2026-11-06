@@ -201,9 +201,18 @@ private struct InputBar: View {
                 Button(action: send) { Image(systemName: "arrow.up") }
                     .buttonStyle(SendButtonStyle(active: true))
                     .transition(.scale(scale: 0.8).combined(with: .opacity))
-            } else if state.activeId == agent.id, state.phase == .idle {
-                Button { state.resumeListening() } label: { Image(systemName: "mic.fill") }
+            } else if state.activeId == agent.id, state.phase == .listening {
+                Button { state.stopListening() } label: { Image(systemName: "stop.fill") }
                     .buttonStyle(SendButtonStyle(active: true))
+                    .accessibilityLabel("Stop listening")
+                    .transition(.scale(scale: 0.8).combined(with: .opacity))
+            } else if state.activeId == agent.id, state.phase == .idle {
+                Button {
+                    typing = false
+                    state.resumeListening()
+                } label: { Image(systemName: "mic.fill") }
+                    .buttonStyle(SendButtonStyle(active: true))
+                    .accessibilityLabel("Talk")
                     .transition(.scale(scale: 0.8).combined(with: .opacity))
             } else {
                 Button(action: send) { Image(systemName: "arrow.up") }
@@ -212,6 +221,9 @@ private struct InputBar: View {
             }
         }
         .animation(Motion.snappy, value: canSend)
+        .animation(Motion.snappy, value: state.phase)
+        // Starting to type means you'd rather type: stop listening.
+        .onChange(of: typing) { _, now in if now { state.stopListening() } }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
     }

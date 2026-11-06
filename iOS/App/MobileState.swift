@@ -72,6 +72,8 @@ final class MobileState {
     @ObservationIgnored private var awaitingTools = false
     /// A reply is still arriving: more sentences may come, so a pause in speech isn't the end.
     @ObservationIgnored private var replyArriving = false
+    /// You're typing to the agent: it doesn't listen after replying until you tap the mic.
+    private(set) var typingMode = false
     /// Your World ID verification (a verified human), once you've done it.
     private(set) var worldIdentity: WorldIdentity?
     @ObservationIgnored private let worldAuth = WorldAuth()
@@ -748,6 +750,7 @@ final class MobileState {
     }
 
     func endConversation() {
+        typingMode = false
         if isListeningNow { _ = speech.finish() }
         if !speech.keepsInputOpen { speech.shutdown() }
         if let id = activeId {
@@ -782,6 +785,10 @@ final class MobileState {
 
     private func startListening() {
         guard let id = activeId else { return }
+        if typingMode {
+            phase = .idle
+            return
+        }
         print("Agentsphere: listening")
         phase = .listening
         transcript = ""
@@ -1118,10 +1125,22 @@ final class MobileState {
     /// is too slow to do on every redraw.
     private(set) var routeName = "Headphones"
 
-    /// Back to listening after a pause (the mic button in a conversation).
+    /// Back to talking (the mic button in a conversation).
     func resumeListening() {
+        typingMode = false
         guard activeId != nil, phase == .idle else { return }
         startListening()
+    }
+
+    /// Stop listening and type instead: the mic closes, and stays closed after replies.
+    func stopListening() {
+        typingMode = true
+        guard phase == .listening else { return }
+        _ = speech.finish()
+        speech.shutdown()
+        transcript = ""
+        phase = .idle
+        print("Agentsphere: typing; mic off")
     }
 
     func refreshRoute() {
