@@ -21,7 +21,7 @@ struct RootView: View {
         TabView(selection: $state.screen) {
             Tab("Explore", systemImage: "safari", value: .explore) { ExploreView() }
             Tab("With me", systemImage: "eye", value: .withMe) { WithMeView() }
-            Tab("Create", systemImage: "plus", value: .create) { CreateView() }
+            Tab("Agents", systemImage: "square.grid.2x2", value: .agents) { AgentsView() }
             Tab("Settings", systemImage: "gearshape", value: .settings) { SettingsView() }
         }
         .tint(.primary)

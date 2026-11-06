@@ -208,8 +208,7 @@ private struct EmptyWithMe: View {
                     .multilineTextAlignment(.center)
             }
             Button("Create one") {
-                state.createFlavor = .withMe
-                state.screen = .create
+                state.startCreating(.withMe)
             }
             .buttonStyle(PrimaryButtonStyle())
             .padding(.top, 6)

@@ -175,8 +175,12 @@ private struct NearbyRow: View {
             Label("Only you", systemImage: "lock.fill")
                 .labelStyle(TightLabel())
                 .font(.subheadline).foregroundStyle(.secondary)
+        } else if agent.pricing == "paid" {
+            Label("Shop", systemImage: "bag.fill")
+                .labelStyle(TightLabel())
+                .font(.subheadline).foregroundStyle(.secondary)
         } else {
-            Text(agent.pricing == "paid" ? "Paid" : "Free").font(.subheadline).foregroundStyle(.secondary)
+            Text("Free").font(.subheadline).foregroundStyle(.secondary)
         }
     }
 }
@@ -238,8 +242,7 @@ private struct EmptyExplore: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             Button("Create an agent") {
-                state.createFlavor = .publicPlace
-                state.screen = .create
+                state.startCreating(.publicPlace)
             }
             .buttonStyle(SecondaryButtonStyle(fullWidth: false))
             .padding(.top, 4)

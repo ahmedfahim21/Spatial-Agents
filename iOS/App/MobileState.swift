@@ -45,7 +45,7 @@ final class MobileState {
     private(set) var asleep: Set<UUID> = []
     private(set) var failing: Set<UUID> = []
     /// Which tab is showing. Looking at agents only does anything on the screens that show them.
-    enum Screen { case explore, withMe, create, settings }
+    enum Screen { case explore, withMe, agents, settings }
     var screen: Screen = .explore { didSet { if oldValue != screen { updateFocus() } } }
     private var lookingEnabled: Bool { screen == .explore || screen == .withMe }
     private(set) var activeId: UUID?
@@ -71,6 +71,15 @@ final class MobileState {
 
     /// The kind of agent Create starts with (other screens can preset it).
     var createFlavor: AgentFlavor = .withMe
+    /// The Create form is open (a sheet over Agents).
+    var creating = false
+
+    /// Opens Create, ready to make this kind of agent.
+    func startCreating(_ flavor: AgentFlavor) {
+        createFlavor = flavor
+        screen = .agents
+        creating = true
+    }
 
     /// While arranging agents, looking at one shouldn't wake it.
     var arranging = false
@@ -288,6 +297,39 @@ final class MobileState {
         }
         syncPlacement()
         return a
+    }
+
+    /// Agents you've placed in the world, public and private, at any distance.
+    var placedAgents: [Agent] { myAgents.filter(\.isGeo) }
+
+    func owns(_ id: UUID) -> Bool { myAgents.contains { $0.id == id } }
+
+    /// Saves changes to one of your agents and, for public places, its menu
+    /// (`menu` nil = leave payments as they are; empty = stop taking payments).
+    func update(_ id: UUID, _ changes: Backend.AgentChanges, menu: [CatalogItem]?) async throws {
+        var updated = try await backend.update(id, changes)
+        if let menu, updated.isPublic, updated.isGeo {
+            let wasPaid = updated.pricing == "paid"
+            if !menu.isEmpty || wasPaid {
+                _ = try await backend.saveCatalog(agentId: id, items: menu)
+                updated.pricing = menu.isEmpty ? "free" : "paid"
+            }
+        }
+        if let i = myAgents.firstIndex(where: { $0.id == id }) {
+            if updated.walletAddress == nil { updated.walletAddress = myAgents[i].walletAddress }
+            myAgents[i] = updated
+        }
+        if let i = nearby.firstIndex(where: { $0.id == id }) {
+            // Keep what only nearby search knows.
+            updated.isMine = true
+            updated.distanceM = nearby[i].distanceM
+            updated.verified = nearby[i].verified
+            nearby[i] = updated
+        }
+        updateArrivals()
+        syncPlacement()
+        // The shop's wallet is assigned on the server: pick it up.
+        if menu?.isEmpty == false { Task { await refreshMine() } }
     }
 
     func delete(_ a: Agent) async {
@@ -998,19 +1040,21 @@ extension MobileState {
             agent("Museum Guide · Hall B", .violet, .squircle, metres: 62, bearing: 45),
             agent("Where I parked", .orange, .hexagon, metres: 200, bearing: 300, mine: true, isPublic: false),
             agent("Sponsor Booth 4", .pink, .drop, metres: 280, bearing: 120),
-            agent("Corner Café Barista", .green, .capsule, metres: 1200, bearing: 250, pricing: "paid"),
+            agent("Corner Café Barista", .green, .capsule, metres: 1200, bearing: 250, pricing: "paid", mine: true),
         ]
         myAgents = [
             agent("Daily Planner", .blue, .hexagon, greeting: "Morning. Want the plan for today?"),
             agent("Notes", .yellow, .squircle, greeting: "What should I jot down?"),
             agent("Pitch Coach", .green, .drop, greeting: "Run me through your demo."),
         ]
+        myAgents += nearby.filter { $0.isMine == true }
         location.simulated = here
         syncPlacement()
         updateArrivals()
         switch UserDefaults.standard.string(forKey: "tab") {
         case "with": screen = .withMe
-        case "create": screen = .create
+        case "agents": screen = .agents
+        case "create": screen = .agents; creating = true
         case "settings": screen = .settings
         default: break
         }
