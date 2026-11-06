@@ -66,7 +66,7 @@ struct ExploreMap: View {
         .onChange(of: state.location.hasFix, initial: true) { _, hasFix in
             guard hasFix, !framed, let here = state.location.coordinate else { return }
             framed = true
-            camera = .region(MKCoordinateRegion(center: here, latitudinalMeters: 250, longitudinalMeters: 250))
+            camera = .region(MKCoordinateRegion(center: here, latitudinalMeters: 450, longitudinalMeters: 450))
         }
     }
 
@@ -348,7 +348,7 @@ struct PlacePicker: View {
             }
             .onAppear {
                 if let start {
-                    camera = .region(MKCoordinateRegion(center: start, latitudinalMeters: 180, longitudinalMeters: 180))
+                    camera = .region(MKCoordinateRegion(center: start, latitudinalMeters: 250, longitudinalMeters: 250))
                     center = start
                 }
             }
@@ -363,7 +363,7 @@ struct PlacePicker: View {
                     Button {
                         let c = item.location.coordinate
                         withAnimation(Motion.smooth) {
-                            camera = .region(MKCoordinateRegion(center: c, latitudinalMeters: 180, longitudinalMeters: 180))
+                            camera = .region(MKCoordinateRegion(center: c, latitudinalMeters: 250, longitudinalMeters: 250))
                         }
                         results = []
                     } label: {
