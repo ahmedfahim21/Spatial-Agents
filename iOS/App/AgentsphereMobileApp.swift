@@ -36,6 +36,14 @@ struct RootView: View {
         }
         .onChange(of: onboarded, initial: true) { _, done in
             #if DEBUG
+            // `-toolTest weather -toolArgs '{"days":1}'` runs one phone tool and logs the result.
+            if let name = UserDefaults.standard.string(forKey: "toolTest") {
+                Task {
+                    try? await Task.sleep(for: .seconds(3))   // a location fix
+                    let call = PhoneTools.Call(id: "test", name: name, arguments: Self.rawArgument("-toolArgs") ?? "{}")
+                    print("Agentsphere: toolTest \(name) -> \(await state.phoneTools.run(call, allowed: Set(AgentTool.allCases)))")
+                }
+            }
             if UserDefaults.standard.bool(forKey: "sample") {
                 state.loadSampleWorld(scene: state.sampleScene)
                 return
@@ -44,6 +52,14 @@ struct RootView: View {
             if done { state.start() }
         }
     }
+
+    #if DEBUG
+    /// The launch argument after `flag`, as typed (UserDefaults would parse it as a plist).
+    private static func rawArgument(_ flag: String) -> String? {
+        let args = ProcessInfo.processInfo.arguments
+        return args.firstIndex(of: flag).flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+    }
+    #endif
 
     private var talking: Binding<Bool> {
         Binding(get: { state.activeId != nil && state.findTargetId == nil && onboarded },

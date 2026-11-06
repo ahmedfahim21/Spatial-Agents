@@ -133,6 +133,13 @@ struct MessageBubble: View {
                 .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 19, style: .continuous))
                 Spacer(minLength: 56)
             }
+        case .tool(let name):
+            Label(message.text, systemImage: AgentTool.owning(name)?.icon ?? "wrench.and.screwdriver")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(Color(.systemGray6), in: Capsule())
+                .frame(maxWidth: .infinity, alignment: .leading)
         case .error:
             Label(message.text, systemImage: "exclamationmark.triangle.fill")
                 .font(.footnote)

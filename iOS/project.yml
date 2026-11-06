@@ -30,6 +30,11 @@ targets:
         NSMotionUsageDescription: AirPods head tracking lets you face an agent to select it and nod or shake to answer.
         NSLocationWhenInUseUsageDescription: Agentsphere uses your location to find agents placed nearby and to place your own.
         NSLocationAlwaysAndWhenInUseUsageDescription: Agentsphere can tell you when an agent is nearby.
+        NSCalendarsFullAccessUsageDescription: Your agents can tell you what's on your calendar and add events when you ask.
+        NSRemindersFullAccessUsageDescription: Your agents can read your to-dos and add or tick off reminders when you ask.
+        NSHealthShareUsageDescription: Your agents can tell you about your steps, sleep, workouts and heart rate when you ask. Health data stays on your iPhone except for the answer to your question.
+        NSHealthUpdateUsageDescription: Agentsphere doesn't write to Apple Health.
+        NSAlarmKitUsageDescription: Your agents can set alarms and timers when you ask.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.abhisheksatpathy.agentsphere

@@ -187,11 +187,21 @@ final class Backend: @unchecked Sendable {
 
     struct Turn: Encodable { let role: String; let content: String }
 
+    /// The reply's text, and any tools the agent wants run on the phone before it answers.
+    struct ChatResult {
+        let text: String
+        let toolCalls: [PhoneTools.Call]
+    }
+
     /// Streams the agent's reply; `onText` gets each new piece, `onOrder` each update of an
-    /// order the agent placed (shops only). Returns the full reply.
-    func chat(agentId: UUID, turns: [Turn], onText: @escaping (String) -> Void,
-              onOrder: @escaping (OrderUpdate) -> Void = { _ in }) async throws -> String {
-        let req = try await functionRequest("chat", body: ["agent_id": agentId.uuidString, "messages": turns.map { ["role": $0.role, "content": $0.content] }])
+    /// order the agent placed (shops only). `messages` are chat messages, including earlier
+    /// tool calls and results; `tools` the tool groups this agent may use on the phone.
+    func chat(agentId: UUID, messages: [[String: Any]], tools: [String] = [], client: [String: String] = [:],
+              onText: @escaping (String) -> Void,
+              onOrder: @escaping (OrderUpdate) -> Void = { _ in }) async throws -> ChatResult {
+        var body: [String: Any] = ["agent_id": agentId.uuidString, "messages": messages, "client": client]
+        if !tools.isEmpty { body["tools"] = tools }
+        let req = try await functionRequest("chat", body: body)
         let (bytes, response) = try await URLSession.shared.bytes(for: req)
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
             var body = Data()
@@ -199,6 +209,7 @@ final class Backend: @unchecked Sendable {
             try check(response, body)
         }
         var full = ""
+        var calls: [PhoneTools.Call] = []
         for try await line in bytes.lines {
             guard line.hasPrefix("data:") else { continue }
             let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
@@ -210,8 +221,14 @@ final class Backend: @unchecked Sendable {
                let update = try? decoder.decode(OrderUpdate.self, from: data) {
                 onOrder(update)
             }
+            if let list = obj["tool_calls"] as? [[String: Any]] {
+                calls += list.compactMap { c in
+                    guard let id = c["id"] as? String, let name = c["name"] as? String else { return nil }
+                    return PhoneTools.Call(id: id, name: name, arguments: c["arguments"] as? String ?? "{}")
+                }
+            }
         }
-        return full
+        return ChatResult(text: full, toolCalls: calls)
     }
 
     /// Wakes the chat and speech-to-text functions (and the auth key cache) before you speak,

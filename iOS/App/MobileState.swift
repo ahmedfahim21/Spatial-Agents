@@ -61,6 +61,13 @@ final class MobileState {
     /// Orders placed in conversations, by the id of their `.order` message.
     private(set) var orders: [UUID: OrderCard] = [:] { didSet { saveConversationsSoon() } }
     @ObservationIgnored private var conversationSave: Task<Void, Never>?
+    /// Runs your agents' tool calls on this phone (calendar, Health, maps…).
+    @ObservationIgnored private(set) lazy var phoneTools = PhoneTools { [weak self] in
+        self?.location.coordinate.map { CLLocation(latitude: $0.latitude, longitude: $0.longitude) }
+    }
+    /// The agent said something like "Let me check." and is waiting on a tool: when that
+    /// line finishes, keep thinking rather than start listening.
+    @ObservationIgnored private var awaitingTools = false
     /// Your World ID verification (a verified human), once you've done it.
     private(set) var worldIdentity: WorldIdentity?
     @ObservationIgnored private let worldAuth = WorldAuth()
@@ -681,6 +688,17 @@ final class MobileState {
         conversations[id, default: []].append(m)
     }
 
+    private func insert(_ m: ChatMessage, before messageId: UUID, of id: UUID) {
+        guard let i = conversations[id]?.firstIndex(where: { $0.id == messageId }) else { return post(m, to: id) }
+        conversations[id]!.insert(m, at: i)
+    }
+
+    /// Tools an agent may use on this phone: only your own agents that aren't public.
+    func toolAccess(_ a: Agent) -> Set<AgentTool> {
+        guard !offline, !a.isPublic, owns(a.id) else { return [] }
+        return ToolAccess.tools(for: a.id)
+    }
+
     /// Starts talking with an agent (after a nod, or a tap).
     func wake(_ a: Agent) {
         print("Agentsphere: wake \(a.name)")
@@ -726,6 +744,7 @@ final class MobileState {
             if phase == .listening, transcript.isEmpty { _ = speech.finish() }
             return
         }
+        if awaitingTools, phase == .speaking { phase = .thinking; return }
         // The agent finished: your turn.
         if activeId != nil, phase == .greeting || phase == .speaking { startListening() }
     }
@@ -812,16 +831,44 @@ final class MobileState {
         let placeholder = ChatMessage(.agent, "")
         post(placeholder, to: id)
         let reply = ReplySpeaker(state: self, agentId: id, messageId: placeholder.id)
+        let allowed = toolAccess(a)
+        let client = ["now": PhoneTools.now, "timezone": TimeZone.current.identifier]
+        var history: [[String: Any]] = turns.map { ["role": $0.role, "content": $0.content] }
         Task { @MainActor in
             do {
-                let full = try await backend.chat(agentId: id, turns: turns, onText: { piece in
-                    DispatchQueue.main.async { MainActor.assumeIsolated { reply.add(piece) } }
-                }, onOrder: { update in
-                    DispatchQueue.main.async { MainActor.assumeIsolated { self.orderUpdate(update, agentId: id) } }
-                })
+                var full = ""
+                // Each round may ask for tools; the last round offers none, so it has to answer.
+                for round in 0..<4 {
+                    let result = try await backend.chat(
+                        agentId: id, messages: history, tools: round < 3 ? allowed.map(\.rawValue) : [], client: client,
+                        onText: { piece in
+                            DispatchQueue.main.async { MainActor.assumeIsolated { reply.add(piece) } }
+                        }, onOrder: { update in
+                            DispatchQueue.main.async { MainActor.assumeIsolated { self.orderUpdate(update, agentId: id) } }
+                        })
+                    full += result.text
+                    guard !result.toolCalls.isEmpty else { break }
+                    // Say "Let me check." now, while the tools run.
+                    awaitingTools = true
+                    if !result.text.isEmpty {
+                        DispatchQueue.main.async { MainActor.assumeIsolated { reply.add(" ") } }
+                    }
+                    history.append([
+                        "role": "assistant", "content": result.text,
+                        "tool_calls": result.toolCalls.map { ["id": $0.id, "type": "function", "function": ["name": $0.name, "arguments": $0.arguments]] },
+                    ])
+                    for call in result.toolCalls {
+                        print("Agentsphere: tool \(call.name) \(call.arguments)")
+                        insert(ChatMessage(.tool(name: call.name), AgentTool.activity(call.name)), before: placeholder.id, of: id)
+                        let output = await phoneTools.run(call, allowed: allowed)
+                        history.append(["role": "tool", "tool_call_id": call.id, "content": output])
+                    }
+                }
+                awaitingTools = false
                 // Queued after every piece, so it runs once they've all been handled.
                 DispatchQueue.main.async { MainActor.assumeIsolated { reply.finish(empty: full.isEmpty) } }
             } catch {
+                self.awaitingTools = false
                 print("Agentsphere: reply failed: \(error.localizedDescription)")
                 self.updateMessage(placeholder.id, of: id) { $0.kind = .error; $0.text = error.localizedDescription }
                 self.failing.insert(id)

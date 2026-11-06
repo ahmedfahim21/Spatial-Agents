@@ -16,6 +16,7 @@ struct EditAgentView: View {
     @State private var context: String
     @State private var radius: Double
     @State private var model: String
+    @State private var tools: Set<AgentTool>
     /// Where it lives; nil = move it to where you are now.
     @State private var place: CLLocationCoordinate2D?
     @State private var acceptsPayments: Bool
@@ -37,6 +38,7 @@ struct EditAgentView: View {
         _context = State(initialValue: agent.context ?? "")
         _radius = State(initialValue: agent.radiusM)
         _model = State(initialValue: agent.model ?? ZGModel.defaultId)
+        _tools = State(initialValue: ToolAccess.tools(for: agent.id))
         _place = State(initialValue: agent.coordinate)
         _acceptsPayments = State(initialValue: agent.pricing == "paid")
     }
@@ -73,6 +75,10 @@ struct EditAgentView: View {
                     TextField("What it knows and how it behaves", text: $context, axis: .vertical)
                         .lineLimit(4...12)
                 } header: { Text("Context") } footer: { Text("Only you see this. People who talk to it never do.") }
+
+                if !agent.isPublic {
+                    ToolAccessSection(selection: $tools)
+                }
 
                 if agent.isGeo {
                     PlaceSection(radius: $radius, place: $place, color: color, shape: shape) { picking = true }
@@ -151,6 +157,7 @@ struct EditAgentView: View {
         )
         // Payments: the menu as edited, empty to stop selling, or untouched if not loaded.
         let newMenu: [CatalogItem]? = sells && menuLoaded ? (acceptsPayments ? menu : []) : nil
+        if !agent.isPublic { ToolAccess.set(tools, for: agent.id) }
         saving = true
         problem = nil
         Task {

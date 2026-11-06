@@ -39,6 +39,7 @@ struct CreateView: View {
     @State private var catalog = [CatalogDraft()]
     @State private var template: AgentTemplate?
     @State private var model = ZGModel.defaultId
+    @State private var tools = Set(AgentTool.available)
     /// Where a placed agent goes; nil = wherever you are when you tap Create.
     @State private var place: CLLocationCoordinate2D?
     @State private var picking = false
@@ -112,6 +113,10 @@ struct CreateView: View {
                         .lineLimit(4...12)
                         .focused($field, equals: .context)
                 } header: { Text("Context") } footer: { Text("Only you see this. People who talk to it never do.") }
+
+                if flavor != .publicPlace {
+                    ToolAccessSection(selection: $tools)
+                }
 
                 // Its own view: it follows GPS, and the rest of the form shouldn't redraw with it.
                 if flavor.needsPlace {
@@ -255,6 +260,7 @@ struct CreateView: View {
         Task {
             do {
                 let a = try await state.create(new)
+                if flavor != .publicPlace { ToolAccess.set(tools, for: a.id) }
                 var done = flavor == .withMe ? "\(a.name) is with you now." : "\(a.name) is on the map."
                 if !items.isEmpty {
                     do {
