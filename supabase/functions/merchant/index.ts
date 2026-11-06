@@ -1,6 +1,6 @@
 // Shop owners: turn on payments for a public agent and save its catalog.
 //   POST /merchant {agent_id, items: [{id?, name, price_usdc, note?}]}
-//        Requires a verified World ID (once World ID is configured on the server).
+//        Requires a verified World ID when SHOPS_REQUIRE_WORLD_ID=true.
 //        Creates the agent's Hedera wallet on first use.
 //        An empty list turns payments off.
 //   POST /merchant/setup   one-time, idempotent: operator USDC association + audit topic.
@@ -42,9 +42,9 @@ Deno.serve(async (req) => {
       return json({ pricing: "free", items: [] });
     }
 
-    // Selling needs a verified human behind the shop. Until World ID is set up on the server,
-    // shops open unverified (and show no badge).
-    if (Deno.env.get("WORLD_CLIENT_ID")) {
+    // With SHOPS_REQUIRE_WORLD_ID=true, selling needs a verified human behind the shop.
+    // Otherwise shops open unverified and only verified owners' agents show the badge.
+    if (Deno.env.get("SHOPS_REQUIRE_WORLD_ID") === "true") {
       const { data: identity } = await db.from("world_identities").select("acr").eq("user_id", uid).maybeSingle();
       if (!identity) return json({ error: "Verify with World ID first", needs_verification: true }, 403);
     }
