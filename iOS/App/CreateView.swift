@@ -55,7 +55,7 @@ struct CreateView: View {
             Form {
                 Section {
                     TemplatePicker(selected: template) { apply($0) }
-                        .listRowInsets(EdgeInsets(top: 0, leading: -20, bottom: 0, trailing: -20))
+                        .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                 } header: { Text("Start from") }
 

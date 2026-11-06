@@ -114,9 +114,15 @@ struct TemplatePicker: View {
                     .accessibilityAddTraits(on ? .isSelected : [])
                 }
             }
-            .padding(.horizontal, 20)
             .padding(.vertical, 2)
         }
-        .scrollClipDisabled()
+        // Form rows clip at their edges, so stay inside and fade out on the right instead:
+        // it reads as "more this way" rather than a card sliced off.
+        .mask {
+            HStack(spacing: 0) {
+                Color.black
+                LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: 28)
+            }
+        }
     }
 }
