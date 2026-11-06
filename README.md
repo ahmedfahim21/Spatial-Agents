@@ -7,6 +7,10 @@ There are two parts:
 - **iPhone app:** personal agents that travel with you, and agents placed in the real world for you or anyone nearby to find.
 - **Landing page:** the site in `web/`.
 
+## Architecture
+
+![Air Agents architecture: AirPods, iPhone, Supabase Edge Functions, 0G, the x402 facilitator, Hedera and World ID](diagrams/architecture.webp)
+
 ## Gestures
 
 | Gesture | Meaning |
