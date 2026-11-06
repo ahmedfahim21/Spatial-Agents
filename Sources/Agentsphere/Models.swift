@@ -26,6 +26,13 @@ struct AgentSession: Identifiable, Equatable {
     var lastReply: String = ""
 }
 
+/// An instruction heard hands-free, sent after a short window unless you shake.
+struct PendingSend: Identifiable {
+    let id = UUID()
+    let text: String
+    let target: UUID
+}
+
 struct LogEntry: Identifiable {
     let id = UUID()
     let date = Date()

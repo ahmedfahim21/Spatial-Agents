@@ -1,4 +1,6 @@
 import AVFoundation
+import AudioToolbox
+import CoreAudio
 import Foundation
 import Speech
 
@@ -10,6 +12,10 @@ final class SpeechInput {
     private var task: SFSpeechRecognitionTask?
     private var tapInstalled = false
     private(set) var latest = ""
+    /// Record from the Mac's built-in mic even if AirPods are the system input. An open
+    /// AirPods mic drops them to call-quality audio, which ruins the spatial sound.
+    var preferBuiltInMic = true
+    private(set) var inputName = "Default input"
 
     /// Called on the main queue with the running transcript.
     var onPartial: ((String) -> Void)?
@@ -50,6 +56,13 @@ final class SpeechInput {
         request = req
 
         let input = engine.inputNode
+        if preferBuiltInMic, let unit = input.audioUnit, var mic = Self.builtInMic() {
+            let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
+                                              &mic, UInt32(MemoryLayout<AudioDeviceID>.size))
+            inputName = status == noErr ? "Built-in mic" : "Default input (couldn't select built-in mic)"
+        } else {
+            inputName = "Default input"
+        }
         let fmt = input.outputFormat(forBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: fmt) { buffer, _ in req.append(buffer) }
         tapInstalled = true
@@ -71,6 +84,29 @@ final class SpeechInput {
         let text = latest
         cleanup()
         return text
+    }
+
+    /// The Mac's built-in microphone, if it has one.
+    static func builtInMic() -> AudioDeviceID? {
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices,
+                                              mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size) == noErr else { return nil }
+        var ids = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &ids) == noErr else { return nil }
+        for id in ids {
+            var transport: UInt32 = 0
+            var tsize = UInt32(MemoryLayout<UInt32>.size)
+            var taddr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyTransportType,
+                                                   mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            guard AudioObjectGetPropertyData(id, &taddr, 0, nil, &tsize, &transport) == noErr,
+                  transport == kAudioDeviceTransportTypeBuiltIn else { continue }
+            var saddr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams,
+                                                   mScope: kAudioObjectPropertyScopeInput, mElement: kAudioObjectPropertyElementMain)
+            var ssize: UInt32 = 0
+            if AudioObjectGetPropertyDataSize(id, &saddr, 0, nil, &ssize) == noErr, ssize > 0 { return id }
+        }
+        return nil
     }
 
     private func cleanup() {

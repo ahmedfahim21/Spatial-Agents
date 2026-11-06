@@ -259,10 +259,26 @@ struct ControlPanel: View {
                         Spacer()
                         Button("Repeat last reply") { state.repeatLast() }
                     }
-                    if state.isListening {
-                        Text(state.transcript.isEmpty ? "Listening…" : state.transcript)
-                            .italic()
-                            .foregroundStyle(.secondary)
+                    Toggle("Hands-free: listen when I face an agent", isOn: $state.handsFree)
+                    if let p = state.pendingSend {
+                        let name = state.sessions.first { $0.id == p.target }?.name ?? "?"
+                        Text("To \(name): “\(p.text)”").bold()
+                        HStack {
+                            Text("Sending… shake to cancel, nod to send now").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Cancel") { state.cancelPendingSend() }
+                            Button("Send now") { state.commitPendingSend() }.buttonStyle(.borderedProminent)
+                        }
+                    } else if state.isListening {
+                        HStack(spacing: 6) {
+                            Image(systemName: "mic.fill").foregroundStyle(.red)
+                            Text(state.transcript.isEmpty ? "Listening to \(state.target?.name ?? "…")" : state.transcript)
+                                .italic()
+                                .foregroundStyle(state.transcript.isEmpty ? .secondary : .primary)
+                        }
+                        if !state.micName.isEmpty {
+                            Text(state.micName).font(.caption2).foregroundStyle(.tertiary)
+                        }
                     }
                     HStack {
                         TextField("Or type an instruction", text: $state.typed)

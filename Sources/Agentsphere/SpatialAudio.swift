@@ -16,6 +16,17 @@ final class SpatialAudio: AgentAudio {
     private var speechTail: [UUID: Task<Void, Never>] = [:]
     let voices: VoiceRouter
 
+    /// Called on the main queue when agents start or stop talking (any agent).
+    var onSpeakingChanged: ((Bool) -> Void)?
+    private var speakingCount = 0
+    private func speakingDelta(_ d: Int) {
+        DispatchQueue.main.async {
+            let was = self.speakingCount > 0
+            self.speakingCount = max(0, self.speakingCount + d)
+            if was != (self.speakingCount > 0) { self.onSpeakingChanged?(self.speakingCount > 0) }
+        }
+    }
+
     var headYaw: Double = 0 { didSet { updatePositions() } }
 
     init(voices: VoiceRouter) {
@@ -102,6 +113,8 @@ final class SpatialAudio: AgentAudio {
         speechTail[id] = Task { [weak self] in
             await previous?.value
             guard let self, !Task.isCancelled else { return }
+            self.speakingDelta(1)
+            defer { self.speakingDelta(-1) }
             let box = ConverterBox()
             var last: AVAudioPCMBuffer?
             await self.voices.speak(text, voiceIndex: index) { pcm in

@@ -8,6 +8,11 @@ final class AppState: ObservableObject {
     @Published var headYaw: Double = 0
     @Published var headStatus = "Starting head tracking…"
     @Published var isListening = false
+    /// Listen automatically when you face an agent; no button needed.
+    @Published var handsFree = true { didSet { handsFree ? scheduleHandsFree() : stopListening() } }
+    /// A heard instruction waiting out its short cancel window.
+    @Published var pendingSend: PendingSend?
+    @Published var micName = ""
     @Published var transcript = ""
     @Published var typed = ""
     @Published var log: [LogEntry] = []
@@ -46,11 +51,13 @@ final class AppState: ObservableObject {
         tracker.onStatus = { [weak self] s in DispatchQueue.main.async { self?.headStatus = s } }
         tracker.onPitch = { [weak self] p in self?.headPitch = p }
         tracker.onGesture = { [weak self] g in self?.handleGesture(g) }
-        speech.onPartial = { [weak self] t in self?.transcript = t }
+        speech.onPartial = { [weak self] t in self?.heard(t) }
         server.onRequest = { [weak self] r in self?.handlePermission(r) }
         server.onStatus = { [weak self] s in self?.serverStatus = s }
         voices.onStatus = { [weak self] s in self?.voiceStatus = s }
         voiceEngine = voices.activeLabel
+        wireAudio()
+        Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in self?.tickHandsFree() }
         HookInstaller.install()
         server.start()
         ShellEnvironment.shared.resolve()
@@ -107,6 +114,7 @@ final class AppState: ObservableObject {
         candidateId = nil
         focusedId = newId
         if let newId { audio.ping(from: newId, high: false) }
+        focusDidChange()
     }
 
     func recenter() {
@@ -129,6 +137,7 @@ final class AppState: ObservableObject {
         audio = audioBackend == .phase ? PhaseAgentAudio(voices: voices) : SpatialAudio(voices: voices)
         for (i, s) in sessions.enumerated() { audio.register(id: s.id, azimuth: s.azimuth, voiceIndex: i) }
         audio.headYaw = headYaw
+        wireAudio()
         appendLog(speaker: "Agentsphere", text: "Spatial engine: \(audioBackend.rawValue).", fromUser: false)
         if let t = target { audio.speak("Now using \(audioBackend == .phase ? "phase" : "the audio engine").", from: t.id) }
     }
@@ -193,6 +202,11 @@ final class AppState: ObservableObject {
 
     private func handleGesture(_ g: HeadGesture) {
         lastGesture = "\(g.rawValue) at \(Date().formatted(date: .omitted, time: .standard))"
+        // A heard instruction is waiting: shake cancels it, nod sends it now.
+        if pendingSend != nil {
+            g == .shake ? cancelPendingSend() : commitPendingSend()
+            return
+        }
         guard let r = activeRequest else { return }
         let allow = g == .nod
         resolve(id: r.id, hash: r.hash, allow: allow,
@@ -297,7 +311,131 @@ final class AppState: ObservableObject {
 
     // MARK: - Talking
 
+    // MARK: - Hands-free talking
+
+    private var agentsSpeaking = false
+    private var handsFreeActive = false
+    private var listeningTarget: UUID?
+    /// Bound when you start speaking, so turning mid-sentence doesn't redirect it.
+    private var utteranceTarget: UUID?
+    private var lastHeardAt = Date()
+    private var listenStartedAt = Date()
+    private var dwellWork: DispatchWorkItem?
+    private var sendWork: DispatchWorkItem?
+
+    private func wireAudio() {
+        audio.onSpeakingChanged = { [weak self] speaking in
+            guard let self else { return }
+            self.agentsSpeaking = speaking
+            // Don't transcribe the agents' own voices; resume once they're done.
+            if speaking, self.handsFreeActive, self.utteranceTarget == nil { self.stopListening() }
+            if !speaking { self.scheduleHandsFree() }
+        }
+    }
+
+    private func focusDidChange() {
+        dwellWork?.cancel()
+        // Facing someone else before saying anything: close the mic.
+        if handsFreeActive, utteranceTarget == nil, listeningTarget != focusedId { stopListening() }
+        scheduleHandsFree()
+    }
+
+    /// Opens the mic after you've faced an agent for a moment.
+    private func scheduleHandsFree() {
+        dwellWork?.cancel()
+        guard handsFree, focusedId != nil, !isListening, !agentsSpeaking, pendingSend == nil else { return }
+        let work = DispatchWorkItem { [weak self] in self?.startHandsFree() }
+        dwellWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+
+    private func startHandsFree() {
+        guard handsFree, let id = focusedId, !isListening, !agentsSpeaking, pendingSend == nil else { return }
+        speech.begin { [weak self] error in
+            guard let self else { return }
+            if let error {
+                self.handsFree = false
+                self.appendLog(speaker: "Agentsphere", text: "Hands-free off: \(error)", fromUser: false)
+                return
+            }
+            guard self.focusedId == id, !self.agentsSpeaking else { _ = self.speech.finish(); return }
+            self.isListening = true
+            self.handsFreeActive = true
+            self.listeningTarget = id
+            self.utteranceTarget = nil
+            self.transcript = ""
+            self.lastHeardAt = Date()
+            self.listenStartedAt = Date()
+            self.micName = self.speech.inputName
+            self.audio.ping(from: id, high: false)
+        }
+    }
+
+    private func heard(_ text: String) {
+        transcript = text
+        lastHeardAt = Date()
+        if handsFreeActive, utteranceTarget == nil, !text.isEmpty { utteranceTarget = listeningTarget }
+    }
+
+    private func tickHandsFree() {
+        guard handsFreeActive, isListening else { return }
+        let silence = Date().timeIntervalSince(lastHeardAt)
+        if !transcript.isEmpty, silence > 1.2 || Date().timeIntervalSince(listenStartedAt) > 45 {
+            finishUtterance()
+        } else if transcript.isEmpty, Date().timeIntervalSince(listenStartedAt) > 50 {
+            // Recognition sessions shouldn't run forever; quietly start a fresh one.
+            stopListening()
+            scheduleHandsFree()
+        }
+    }
+
+    private func finishUtterance() {
+        let text = speech.finish().trimmingCharacters(in: .whitespacesAndNewlines)
+        let target = utteranceTarget ?? listeningTarget
+        isListening = false
+        handsFreeActive = false
+        transcript = ""
+        utteranceTarget = nil
+        guard let target, text.split(separator: " ").count >= 2 else { scheduleHandsFree(); return }
+        pendingSend = PendingSend(text: text, target: target)
+        audio.ping(from: target, high: false)
+        let work = DispatchWorkItem { [weak self] in self?.commitPendingSend() }
+        sendWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
+    }
+
+    func commitPendingSend() {
+        sendWork?.cancel()
+        guard let p = pendingSend else { return }
+        pendingSend = nil
+        dispatch(p.text, to: p.target)
+        scheduleHandsFree()
+    }
+
+    func cancelPendingSend() {
+        sendWork?.cancel()
+        guard let p = pendingSend else { return }
+        pendingSend = nil
+        appendLog(speaker: "Agentsphere", text: "Cancelled: “\(p.text)”", fromUser: false)
+        audio.ping(from: p.target, high: false)
+        scheduleHandsFree()
+    }
+
+    private func stopListening() {
+        guard isListening || handsFreeActive else { return }
+        _ = speech.finish()
+        isListening = false
+        handsFreeActive = false
+        transcript = ""
+        utteranceTarget = nil
+    }
+
     func toggleListening() {
+        // ⌥Space while hands-free is listening: treat it as "I'm done talking".
+        if handsFreeActive {
+            if transcript.isEmpty { stopListening() } else { finishUtterance() }
+            return
+        }
         if isListening {
             isListening = false
             let text = speech.finish().trimmingCharacters(in: .whitespacesAndNewlines)

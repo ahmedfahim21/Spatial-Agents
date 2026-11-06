@@ -13,6 +13,7 @@ protocol AgentAudio: AnyObject {
     func setAzimuth(id: UUID, azimuth: Double)
     func speak(_ text: String, from id: UUID)
     func ping(from id: UUID, high: Bool)
+    var onSpeakingChanged: ((Bool) -> Void)? { get set }
 }
 
 enum AudioBackendKind: String, CaseIterable, Identifiable {
@@ -120,6 +121,18 @@ final class PhaseAgentAudio: AgentAudio {
         self.voices = voices
     }
 
+    /// Called on the main queue when agents start or stop talking (any agent).
+    var onSpeakingChanged: ((Bool) -> Void)?
+    private var speakingCount = 0
+    private func speakingDelta(_ d: Int) {
+        DispatchQueue.main.async {
+            let was = self.speakingCount > 0
+            self.speakingCount = max(0, self.speakingCount + d)
+            if was != (self.speakingCount > 0) { self.onSpeakingChanged?(self.speakingCount > 0) }
+        }
+    }
+
+
     func register(id: UUID, azimuth: Double, voiceIndex: Int) {
         guard agents[id] == nil else { return }
         let source = scene.makeSource()
@@ -172,6 +185,8 @@ final class PhaseAgentAudio: AgentAudio {
         speechTail[id] = Task { [weak self] in
             await previous?.value
             guard let self, !Task.isCancelled else { return }
+            self.speakingDelta(1)
+            defer { self.speakingDelta(-1) }
             var converter: AVAudioConverter?
             var scheduled = false
             await self.voices.speak(text, voiceIndex: a.voiceIndex) { pcm in
