@@ -19,6 +19,14 @@ final class AppState: ObservableObject {
     /// A heard instruction waiting out its short cancel window.
     @Published var pendingSend: PendingSend?
     @Published var micName = ""
+    @Published var useBuiltInMic = false {
+        didSet {
+            speech.preferBuiltInMic = useBuiltInMic
+            stopListening()
+            speech.shutdown()
+            scheduleHandsFree()
+        }
+    }
     @Published var transcript = ""
     @Published var typed = ""
     @Published var log: [LogEntry] = []
@@ -375,7 +383,12 @@ final class AppState: ObservableObject {
             self.lastHeardAt = Date()
             self.listenStartedAt = Date()
             self.micName = self.speech.inputName
-            self.audio.ping(from: id, high: false)
+            // AirPods take a moment to switch to headset mode; tick once they have.
+            let delay = self.speech.keepsInputOpen ? 0 : 0.6
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, self.handsFreeActive, self.listeningTarget == id else { return }
+                self.audio.ping(from: id, high: false)
+            }
         }
     }
 
@@ -399,6 +412,7 @@ final class AppState: ObservableObject {
 
     private func finishUtterance() {
         let text = speech.finish().trimmingCharacters(in: .whitespacesAndNewlines)
+        releaseMicIfNeeded()
         let target = utteranceTarget ?? listeningTarget
         isListening = false
         handsFreeActive = false
@@ -429,9 +443,15 @@ final class AppState: ObservableObject {
         scheduleHandsFree()
     }
 
+    /// The AirPods mic keeps them in mono headset mode, so close it whenever we're not listening.
+    private func releaseMicIfNeeded() {
+        if !speech.keepsInputOpen { speech.shutdown() }
+    }
+
     private func stopListening() {
         guard isListening || handsFreeActive else { return }
         _ = speech.finish()
+        releaseMicIfNeeded()
         isListening = false
         handsFreeActive = false
         transcript = ""

@@ -281,6 +281,15 @@ struct ControlPanel: View {
                         Button("Repeat last reply") { state.repeatLast() }
                     }
                     Toggle("Hands-free: listen when I face an agent", isOn: $state.handsFree)
+                    Picker("Mic", selection: $state.useBuiltInMic) {
+                        Text("AirPods").tag(false)
+                        Text("Mac built-in").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    Text(state.useBuiltInMic
+                         ? "Built-in mic: AirPods stay in stereo, but you need to be near the Mac."
+                         : "AirPods mic: talk from anywhere. While it's open the AirPods switch to mono, so the mic only opens while you're speaking to an agent.")
+                        .font(.caption2).foregroundStyle(.secondary)
                     if let p = state.pendingSend {
                         let name = state.sessions.first { $0.id == p.target }?.name ?? "?"
                         Text("To \(name): “\(p.text)”").bold()

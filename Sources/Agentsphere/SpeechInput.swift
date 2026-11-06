@@ -21,9 +21,14 @@ final class SpeechInput {
     private var task: SFSpeechRecognitionTask?
     private var authorized = false
     private(set) var latest = ""
-    /// Record from the Mac's built-in mic even if AirPods are the system input. An open
-    /// AirPods mic drops them to call-quality audio, which ruins the spatial sound.
-    var preferBuiltInMic = true
+    /// false (default): the system input, i.e. the AirPods mic, so you can talk from anywhere.
+    /// true: the Mac's built-in mic, which keeps AirPods in stereo but only hears you near the Mac.
+    /// While the AirPods mic is open macOS switches them to mono headset mode.
+    var preferBuiltInMic = false
+    /// Keeping the input open avoids hardware reconfiguration, but an open AirPods mic keeps
+    /// them in mono headset mode, so only the built-in mic stays open between utterances.
+    var keepsInputOpen: Bool { preferBuiltInMic }
+    private var openedAt = Date.distantPast
     private(set) var inputName = "Default input"
 
     /// Called on the main queue with the running transcript.
@@ -84,11 +89,20 @@ final class SpeechInput {
         e.prepare()
         try e.start()
         engine = e
-        // If the input device changes underneath us, drop the engine; the next begin rebuilds it.
+        // Opening the AirPods mic flips them into headset mode, which reconfigures this very
+        // engine. Reopen the input so an active recognition keeps getting audio.
         configObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: e, queue: .main) { [weak self] _ in
-            print("Agentsphere: mic input configuration changed; reopening on next listen")
-            self?.shutdownInput()
+            guard let self else { return }
+            print("Agentsphere: mic input configuration changed; reopening")
+            self.shutdownInput()
+            let listening = self.requestLock.withLock { self.currentRequest != nil }
+            if listening {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    do { try self.ensureInput() } catch { print("Agentsphere: mic reopen failed: \(error)") }
+                }
+            }
         }
+        openedAt = Date()
         print("Agentsphere: mic open (\(inputName), \(Int(fmt.sampleRate)) Hz)")
     }
 
