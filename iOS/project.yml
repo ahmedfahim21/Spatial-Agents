@@ -21,7 +21,7 @@ targets:
     info:
       path: App/Info.plist
       properties:
-        CFBundleDisplayName: Agentsphere
+        CFBundleDisplayName: Air Agents
         UILaunchScreen: {}
         # World ID finishes in Safari when World App hands back; Safari opens agentsphere://world?…
         CFBundleURLTypes:
@@ -29,15 +29,15 @@ targets:
             CFBundleURLSchemes: [agentsphere]
         UIBackgroundModes: [audio, location]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
-        NSMicrophoneUsageDescription: Agentsphere listens when you face an agent so you can talk to it hands-free.
+        NSMicrophoneUsageDescription: Air Agents listens when you face an agent so you can talk to it hands-free.
         NSSpeechRecognitionUsageDescription: Your words are transcribed on-device and sent to the agent you're talking to.
         NSMotionUsageDescription: AirPods head tracking lets you face an agent to select it and nod or shake to answer.
-        NSLocationWhenInUseUsageDescription: Agentsphere uses your location to find agents placed nearby and to place your own.
-        NSLocationAlwaysAndWhenInUseUsageDescription: Agentsphere can tell you when an agent is nearby.
+        NSLocationWhenInUseUsageDescription: Air Agents uses your location to find agents placed nearby and to place your own.
+        NSLocationAlwaysAndWhenInUseUsageDescription: Air Agents can tell you when an agent is nearby.
         NSCalendarsFullAccessUsageDescription: Your agents can tell you what's on your calendar and add events when you ask.
         NSRemindersFullAccessUsageDescription: Your agents can read your to-dos and add or tick off reminders when you ask.
         NSHealthShareUsageDescription: Your agents can tell you about your steps, sleep, workouts and heart rate when you ask. Health data stays on your iPhone except for the answer to your question.
-        NSHealthUpdateUsageDescription: Agentsphere doesn't write to Apple Health.
+        NSHealthUpdateUsageDescription: Air Agents doesn't write to Apple Health.
         NSAlarmKitUsageDescription: Your agents can set alarms and timers when you ask.
         AgentsphereHealthKit: true
     entitlements:

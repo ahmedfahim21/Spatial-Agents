@@ -96,7 +96,7 @@ export async function wallet(db: SupabaseClient, kind: "agent" | "user", owner: 
   const created = await new AccountCreateTransaction()
     .setKeyWithoutAlias(key.publicKey)
     .setInitialBalance(new Hbar(1))
-    .setAccountMemo(`Agentsphere ${kind} wallet`)
+    .setAccountMemo(`Air Agents ${kind} wallet`)
     .execute(client);
   const accountId = (await created.getReceipt(client)).accountId!.toString();
 
@@ -183,7 +183,7 @@ export async function auditTopic(db: SupabaseClient): Promise<string> {
   if (data?.value) return data.value;
   const { client, key } = operator();
   const tx = await new TopicCreateTransaction()
-    .setTopicMemo("Agentsphere: agent spending audit log")
+    .setTopicMemo("Air Agents: agent spending audit log")
     .setSubmitKey(key.publicKey)
     .execute(client);
   const topic = (await tx.getReceipt(client)).topicId!.toString();

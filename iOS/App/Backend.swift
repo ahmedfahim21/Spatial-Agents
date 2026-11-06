@@ -370,7 +370,7 @@ final class Backend: @unchecked Sendable {
 /// Agents' voices from the server (ElevenLabs behind the `tts` function).
 /// If the server has no voice key it steps aside for a while and Apple's voice takes over.
 final class ServerVoice: VoiceEngine, @unchecked Sendable {
-    let label = "Agentsphere voice"
+    let label = "Air Agents voice"
     private let lock = NSLock()
     private var disabledUntil = Date.distantPast
 

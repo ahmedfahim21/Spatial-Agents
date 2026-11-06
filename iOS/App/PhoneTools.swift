@@ -339,7 +339,7 @@ final class PhoneTools {
 
     private func healthSummary(_ args: [String: Any]) async throws -> Any {
         guard Self.healthAvailable, HKHealthStore.isHealthDataAvailable() else {
-            throw Failure("Apple Health isn't set up for Agentsphere yet.")
+            throw Failure("Apple Health isn't set up for Air Agents yet.")
         }
         let metrics = (args["metrics"] as? [String]) ?? ["steps"]
         let days = min(30, max(1, (args["days"] as? Int) ?? Int((args["days"] as? Double) ?? 1)))
@@ -610,7 +610,7 @@ final class PhoneTools {
             if try await m.requestAuthorization() == .authorized { return }
         default: break
         }
-        throw Failure("No permission to set alarms. The user can allow it in Settings › Agentsphere.")
+        throw Failure("No permission to set alarms. The user can allow it in Settings › Air Agents.")
     }
 
     private func ring(at date: Date, title: String) async throws {

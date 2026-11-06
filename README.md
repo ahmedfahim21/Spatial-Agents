@@ -1,4 +1,4 @@
-# Agentsphere
+# Air Agents
 
 Your AI agents sit in the space around you. Look at one, nod, and talk. It replies from where it sits.
 

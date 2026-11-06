@@ -144,7 +144,7 @@ final class AppState: ObservableObject {
 
     func recenter() {
         tracker.recenter()
-        appendLog(speaker: "Agentsphere", text: "Recentered: where you're looking is now the front.", fromUser: false)
+        appendLog(speaker: "Air Agents", text: "Recentered: where you're looking is now the front.", fromUser: false)
     }
 
     // MARK: - Chat
@@ -176,7 +176,7 @@ final class AppState: ObservableObject {
         for (i, s) in sessions.enumerated() { audio.register(id: s.id, azimuth: s.azimuth, voiceIndex: i) }
         audio.headYaw = headYaw
         wireAudio()
-        appendLog(speaker: "Agentsphere", text: "Spatial engine: \(audioBackend.rawValue).", fromUser: false)
+        appendLog(speaker: "Air Agents", text: "Spatial engine: \(audioBackend.rawValue).", fromUser: false)
         if let t = target { audio.speak("Now using \(audioBackend == .phase ? "phase" : "the audio engine").", from: t.id) }
     }
 
@@ -202,12 +202,12 @@ final class AppState: ObservableObject {
         let name = agent?.name ?? "Unknown agent"
 
         if readOnlyTools.contains(r.toolName) {
-            r.respond(true, "Read-only tool, auto-allowed by Agentsphere.")
+            r.respond(true, "Read-only tool, auto-allowed by Air Agents.")
             appendLog(speaker: name, text: "Auto-allowed \(r.toolName).", fromUser: false)
             return
         }
         guard let agent else {
-            r.respond(false, "Agentsphere doesn't know this session.")
+            r.respond(false, "Air Agents doesn't know this session.")
             return
         }
 
@@ -317,7 +317,7 @@ final class AppState: ObservableObject {
         }
         place(s)
         if !fresh { loadHistory(agentId: s.id, sessionId: d.sessionId) }
-        appendLog(speaker: "Agentsphere",
+        appendLog(speaker: "Air Agents",
                   text: fresh ? "New session in \(d.directory.path)."
                       : d.isLive ? "Attached to live session “\(d.title)” — it's open elsewhere, so the first turn forks it."
                       : "Resuming “\(d.title.isEmpty ? d.sessionId : d.title)”.",
@@ -345,7 +345,7 @@ final class AppState: ObservableObject {
     }
 
     func removeSession(_ id: UUID) {
-        for r in pending where r.agentId == id { resolve(id: r.id, hash: r.hash, allow: false, reason: "Agent removed from Agentsphere.") }
+        for r in pending where r.agentId == id { resolve(id: r.id, hash: r.hash, allow: false, reason: "Agent removed from Air Agents.") }
         audio.remove(id: id)
         sessions.removeAll { $0.id == id }
         if selectedId == id { selectedId = sessions.first?.id }
@@ -426,7 +426,7 @@ final class AppState: ObservableObject {
             guard let self else { return }
             if let error {
                 self.handsFree = false
-                self.appendLog(speaker: "Agentsphere", text: "Hands-free off: \(error)", fromUser: false)
+                self.appendLog(speaker: "Air Agents", text: "Hands-free off: \(error)", fromUser: false)
                 return
             }
             guard self.focusedId == id, !self.agentsSpeaking else { _ = self.speech.finish(); return }
@@ -496,7 +496,7 @@ final class AppState: ObservableObject {
         sendWork?.cancel()
         guard let p = pendingSend else { return }
         pendingSend = nil
-        appendLog(speaker: "Agentsphere", text: "Cancelled: “\(p.text)”", fromUser: false)
+        appendLog(speaker: "Air Agents", text: "Cancelled: “\(p.text)”", fromUser: false)
         audio.ping(from: p.target, high: false)
         scheduleHandsFree()
     }
@@ -541,7 +541,7 @@ final class AppState: ObservableObject {
             speech.begin { [weak self] error in
                 guard let self else { return }
                 if let error {
-                    self.appendLog(speaker: "Agentsphere", text: error, fromUser: false)
+                    self.appendLog(speaker: "Air Agents", text: error, fromUser: false)
                 } else {
                     self.isListening = true
                 }
@@ -557,7 +557,7 @@ final class AppState: ObservableObject {
 
     func send(_ text: String) {
         guard let t = target else {
-            appendLog(speaker: "Agentsphere", text: "Face an agent (or click one) before talking.", fromUser: false)
+            appendLog(speaker: "Air Agents", text: "Face an agent (or click one) before talking.", fromUser: false)
             return
         }
         dispatch(text, to: t.id)

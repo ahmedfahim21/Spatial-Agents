@@ -72,7 +72,7 @@ struct SetupView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            Label("Keep Spatial Audio **Off** for Agentsphere in Control Center. The app places sounds itself.", systemImage: "info.circle")
+            Label("Keep Spatial Audio **Off** for Air Agents in Control Center. The app places sounds itself.", systemImage: "info.circle")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .padding(14)

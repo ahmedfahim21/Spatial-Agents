@@ -337,7 +337,7 @@ function systemPrompt(a: AgentRow, tools = false, client?: { now?: string; timez
     ? "You live at a real place; people walk up to you and talk to you through their AirPods."
     : "You travel with your owner, sitting around them in spatial audio.";
   return [
-    `You are ${a.name}, an agent in Agentsphere. ${where}`,
+    `You are ${a.name}, an agent in Air Agents. ${where}`,
     a.context ? `What you know and how you behave:\n${a.context}` : "",
     a.greeting ? `You introduced yourself with: "${a.greeting}"` : "",
     a.items.length ? menu(a.items) : "",

@@ -1,4 +1,4 @@
-# Agentsphere — project brief
+# Air Agents — project brief
 
 Hackathon project for **ETHGlobal Mumbai** (Nov 5–7, 2026). **Deadline: Saturday Nov 7, 09:00 IST.** Commit small and often.
 
@@ -10,7 +10,7 @@ Your Claude Code sessions sit around your head. Face one to select it, talk to i
 
 ## The problem
 
-You run several Claude Code sessions, walk away, and one hits a permission prompt. It sits blocked until you're back at the keyboard. Agentsphere lets you handle it from anywhere with AirPods on.
+You run several Claude Code sessions, walk away, and one hits a permission prompt. It sits blocked until you're back at the keyboard. Air Agents lets you handle it from anywhere with AirPods on.
 
 ## Gestures
 
@@ -39,10 +39,10 @@ SwiftUI macOS app, Swift Package, macOS 14+. Build with `./build.sh run` (wraps 
 3. **Permission requests in your ear.**
    - Add a small local HTTP server in the app (e.g. `127.0.0.1:7777`).
    - Install a Claude Code `PreToolUse` hook in each agent's folder (`.claude/settings.json`) that sends the pending tool call to the server and waits for the answer. Check the current Claude Code hooks docs for the exact JSON input/output and how to return allow/deny.
-   - Agentsphere speaks a one-sentence summary from that agent's position ("Left: wants to run npm install"), waits for nod (allow) or shake (deny). Timeout = deny.
+   - Air Agents speaks a one-sentence summary from that agent's position ("Left: wants to run npm install"), waits for nod (allow) or shake (deny). Timeout = deny.
    - Read-only tools (Read, Grep, Glob) auto-allow so you aren't spammed.
    - Bind each approval to a hash of the exact tool name + arguments.
-   - Once this works, drop `--permission-mode acceptEdits` so all approvals go through Agentsphere.
+   - Once this works, drop `--permission-mode acceptEdits` so all approvals go through Air Agents.
 4. **Attach to existing sessions (stretch).** Let the user add a session by Claude session id / folder so it resumes what they already started, not just new headless ones.
 5. **Ambient presence (polish).** Quiet per-agent sound while working, silence when idle, chime when done, so you can hear who's busy without anyone talking.
 6. **Sweep to discover.** As the head passes an agent, it speaks its name and status.

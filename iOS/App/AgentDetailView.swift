@@ -213,8 +213,8 @@ struct AgentDetailView: View {
 
     private func shareText(_ a: Agent) -> String {
         a.isGeo && a.isPublic
-            ? "Come find \(a.name) on Agentsphere. Look at it and nod, and it'll talk to you."
-            : "I've got \(a.name) on Agentsphere: an agent that sits around my head and talks when I look at it."
+            ? "Come find \(a.name) on Air Agents. Look at it and nod, and it'll talk to you."
+            : "I've got \(a.name) on Air Agents: an agent that sits around my head and talks when I look at it."
     }
 
     private func tile(_ title: String, _ icon: String, action: @escaping () -> Void) -> some View {

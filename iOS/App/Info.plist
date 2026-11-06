@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Agentsphere</string>
+	<string>Air Agents</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -40,13 +40,13 @@
 	<key>NSHealthShareUsageDescription</key>
 	<string>Your agents can tell you about your steps, sleep, workouts and heart rate when you ask. Health data stays on your iPhone except for the answer to your question.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>Agentsphere doesn't write to Apple Health.</string>
+	<string>Air Agents doesn't write to Apple Health.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>Agentsphere can tell you when an agent is nearby.</string>
+	<string>Air Agents can tell you when an agent is nearby.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Agentsphere uses your location to find agents placed nearby and to place your own.</string>
+	<string>Air Agents uses your location to find agents placed nearby and to place your own.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Agentsphere listens when you face an agent so you can talk to it hands-free.</string>
+	<string>Air Agents listens when you face an agent so you can talk to it hands-free.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>AirPods head tracking lets you face an agent to select it and nod or shake to answer.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>

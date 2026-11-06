@@ -1,4 +1,4 @@
-// Renders the Agentsphere app icon (design page "Spatial Agents logo") at 1024 px.
+// Renders the Air Agents app icon (design page "Spatial Agents logo") at 1024 px.
 // Usage: swift scripts/render-app-icon.swift iOS/App/Assets.xcassets/AppIcon.appiconset
 import CoreGraphics
 import Foundation

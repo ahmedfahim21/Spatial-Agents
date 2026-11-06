@@ -5,9 +5,9 @@
     <key>CFBundleIdentifier</key>
     <string>xyz.agentsphere.app</string>
     <key>CFBundleName</key>
-    <string>Agentsphere</string>
+    <string>Air Agents</string>
     <key>CFBundleDisplayName</key>
-    <string>Agentsphere</string>
+    <string>Air Agents</string>
     <key>CFBundleExecutable</key>
     <string>Agentsphere</string>
     <key>CFBundlePackageType</key>
@@ -21,10 +21,10 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Agentsphere listens when you hold the talk key so you can speak to the agent you're facing.</string>
+    <string>Air Agents listens when you hold the talk key so you can speak to the agent you're facing.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
-    <string>Agentsphere turns your voice into instructions for your Claude Code sessions.</string>
+    <string>Air Agents turns your voice into instructions for your Claude Code sessions.</string>
     <key>NSMotionUsageDescription</key>
-    <string>Agentsphere uses your AirPods head tracking to know which agent you're facing.</string>
+    <string>Air Agents uses your AirPods head tracking to know which agent you're facing.</string>
 </dict>
 </plist>

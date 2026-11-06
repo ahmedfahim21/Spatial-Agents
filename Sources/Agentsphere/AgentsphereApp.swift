@@ -13,7 +13,7 @@ struct AgentsphereApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Agentsphere") {
+        WindowGroup("Air Agents") {
             ContentView()
                 .environmentObject(state)
                 .frame(minWidth: 1180, minHeight: 680)
@@ -214,7 +214,7 @@ struct ControlPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text("Agentsphere").font(.title2.bold())
+                Text("Air Agents").font(.title2.bold())
                 Spacer()
                 Button("Sound Lab") { openWindow(id: "lab") }
                     .keyboardShortcut("l", modifiers: .option)
