@@ -23,6 +23,10 @@ targets:
       properties:
         CFBundleDisplayName: Agentsphere
         UILaunchScreen: {}
+        # World ID finishes in Safari when World App hands back; Safari opens agentsphere://world?…
+        CFBundleURLTypes:
+          - CFBundleURLName: com.abhisheksatpathy.agentsphere
+            CFBundleURLSchemes: [agentsphere]
         UIBackgroundModes: [audio, location]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSMicrophoneUsageDescription: Agentsphere listens when you face an agent so you can talk to it hands-free.

@@ -950,6 +950,9 @@ final class MobileState {
         if let identity = try? await backend.worldIdentity() { worldIdentity = identity }
     }
 
+    /// A World ID result that came back as a link (via Safari) instead of in the sign-in sheet.
+    func openURL(_ url: URL) { worldAuth.handle(url) }
+
     /// Verify you're a human with World ID (for running a shop). Updates badges when it works.
     func verifyWithWorld() async -> WorldAuth.Outcome {
         let outcome = await worldAuth.run(purpose: "verify_shop")

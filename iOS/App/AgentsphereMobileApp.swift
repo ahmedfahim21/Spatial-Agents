@@ -31,6 +31,7 @@ struct RootView: View {
                 ConversationScreen(agentId: id).presentationDragIndicator(.visible)
             }
         }
+        .onOpenURL { state.openURL($0) }
         .fullScreenCover(isPresented: Binding(get: { !onboarded }, set: { onboarded = !$0 })) {
             OnboardingView { onboarded = true }
         }

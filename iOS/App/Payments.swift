@@ -193,6 +193,7 @@ final class WorldAuth: NSObject, ASWebAuthenticationPresentationContextProviding
     }
 
     private var session: ASWebAuthenticationSession?
+    private var pending: CheckedContinuation<Outcome, Never>?
 
     func run(purpose: String, approvalId: String? = nil) async -> Outcome {
         let url: URL
@@ -201,28 +202,56 @@ final class WorldAuth: NSObject, ASWebAuthenticationPresentationContextProviding
         } catch {
             return .failed(error.localizedDescription)
         }
+        finish(.cancelled)   // an earlier attempt still waiting
         return await withCheckedContinuation { cont in
-            let s = ASWebAuthenticationSession(url: url, callbackURLScheme: "agentsphere") { callback, error in
-                if let error = error as? ASWebAuthenticationSessionError, error.code == .canceledLogin {
-                    cont.resume(returning: .cancelled)
-                    return
-                }
-                guard let callback, let items = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems else {
-                    cont.resume(returning: .failed(error?.localizedDescription ?? "World ID didn't answer"))
-                    return
-                }
-                let value = { (name: String) in items.first { $0.name == name }?.value }
-                switch value("result") {
-                case "ok": cont.resume(returning: .ok)
-                case "denied": cont.resume(returning: .denied)
-                default: cont.resume(returning: .failed(value("detail") ?? "Verification failed"))
+            pending = cont
+            let s = ASWebAuthenticationSession(url: url, callbackURLScheme: "agentsphere") { [weak self] callback, error in
+                MainActor.assumeIsolated {
+                    if let error = error as? ASWebAuthenticationSessionError, error.code == .canceledLogin {
+                        self?.finish(.cancelled)
+                    } else if let callback {
+                        self?.finish(Self.outcome(callback))
+                    } else {
+                        self?.finish(.failed(error?.localizedDescription ?? "World ID didn't answer"))
+                    }
                 }
             }
             // A fresh check every time, with no saved session to fall back on.
             s.prefersEphemeralWebBrowserSession = true
             s.presentationContextProvider = self
             session = s
-            if !s.start() { cont.resume(returning: .failed("Couldn't open World ID")) }
+            if !s.start() { finish(.failed("Couldn't open World ID")) }
+        }
+    }
+
+    /// World App finishes by opening our callback in Safari rather than in the sheet; Safari
+    /// then hands `agentsphere://world?result=…` to the app, which lands here.
+    func handle(_ url: URL) {
+        guard url.scheme == "agentsphere", url.host == "world" else { return }
+        print("Agentsphere: World ID result via link: \(url.query ?? "")")
+        let outcome = Self.outcome(url)
+        finish(outcome)
+    }
+
+    /// Resumes the waiting caller once, and closes the sheet if it's still up.
+    private func finish(_ outcome: Outcome) {
+        guard let cont = pending else { return }
+        pending = nil
+        let s = session
+        session = nil
+        s?.cancel()
+        cont.resume(returning: outcome)
+    }
+
+    /// The result in the redirect only says how it went; the server holds the verdict.
+    private static func outcome(_ url: URL) -> Outcome {
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let value = { (name: String) in items.first { $0.name == name }?.value }
+        switch value("result") {
+        case "ok": return .ok
+        case "denied": return .denied
+        case "cancelled": return .cancelled
+        default: return .failed(value("detail") ?? "Verification failed")
         }
     }
 
