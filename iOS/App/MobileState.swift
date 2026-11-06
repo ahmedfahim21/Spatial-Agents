@@ -140,8 +140,16 @@ final class MobileState {
     /// The order card of each agent's reply in flight.
     @ObservationIgnored private var liveOrder: [UUID: UUID] = [:]
 
-    /// Where each body-anchored agent sits around you.
+    /// Where each body-anchored agent sits around you right now.
     private(set) var zones: [UUID: Zone] = [:]
+    /// Your usual pair (outside any time of day), saved as "zones".
+    @ObservationIgnored private var defaultZones: [UUID: Zone] = [:]
+    /// Pairs by time of day.
+    var lineups: [Lineup] = LineupStore.load() { didSet { LineupStore.save(lineups) } }
+    /// The time of day in effect now, if any.
+    private(set) var activeLineupId: UUID?
+    var activeLineup: Lineup? { lineups.first { $0.id == activeLineupId } }
+    @ObservationIgnored private var lastLineupCheck = Date.distantPast
     /// The user has set their forward direction and arranged their agents.
     private(set) var calibrated = UserDefaults.standard.bool(forKey: "calibrated")
     /// Head pitch when looking straight ahead (AirPods sit differently on everyone).
@@ -230,11 +238,13 @@ final class MobileState {
 
         (conversations, orders, toolNotes) = ConversationStore.load()
         if let saved = UserDefaults.standard.dictionary(forKey: "zones") as? [String: String] {
-            zones = Dictionary(uniqueKeysWithValues: saved.compactMap { k, v in
+            defaultZones = Dictionary(uniqueKeysWithValues: saved.compactMap { k, v in
                 guard let id = UUID(uuidString: k), let z = Zone(rawValue: v) else { return nil }
                 return (id, z)
             })
+            zones = defaultZones
         }
+        activeLineupId = currentLineupId()
         // The tracker reports head yaw in a fixed frame; GlanceTracker works out where "rest"
         // (your body, roughly) is, so agents stay on your left and right as you turn and walk.
         tracker.followMe = false
@@ -575,6 +585,7 @@ final class MobileState {
         }
         let direction = exactAngle(a.id).map(Words.voiceDirection)
         print("Agentsphere: announce \(a.name) (\(arrival ? "arrival" : "nearby"), \(direction ?? "no direction"))")
+        if !arrival { haptics.light() }
         guard announce == .voice else {
             audio.cue(.chime, from: a.id)
             return
@@ -634,6 +645,7 @@ final class MobileState {
         guard raw != current else { proximityCandidate = nil; return }
         if let c = proximityCandidate, c.state == raw {
             if Date().timeIntervalSince(c.since) >= 3 {
+                if raw == .nearby { haptics.light() }
                 findProximity = raw
                 proximityCandidate = nil
             }
@@ -709,22 +721,38 @@ final class MobileState {
     /// Windows you emptied on purpose: new agents don't fill them.
     private var emptiedWindows: Set<Zone> = Set((UserDefaults.standard.stringArray(forKey: "emptiedWindows") ?? []).compactMap(Zone.init))
 
-    /// Keeps each window's agent; a free window (that you didn't empty) takes the next agent
-    /// without one, oldest first.
+    /// A time of day sets the windows exactly. Otherwise your usual pair: each window keeps
+    /// its agent, and a free window (that you didn't empty) takes the next agent without one.
     private func assignZones() {
         let ids = Set(bodyAgents.map(\.id))
-        var next = zones.filter { ids.contains($0.key) }
+        if let l = activeLineup {
+            var next: [UUID: Zone] = [:]
+            for z in Zone.allCases { if let id = l[z], ids.contains(id) { next[id] = z } }
+            if next != zones { zones = next }
+            return
+        }
+        var next = defaultZones.filter { ids.contains($0.key) }
         for a in bodyAgents.reversed() where next[a.id] == nil {
             let used = Set(next.values)
             if let free = Zone.fillOrder.first(where: { !used.contains($0) && !emptiedWindows.contains($0) }) { next[a.id] = free }
         }
-        if next != zones { zones = next; saveZones() }
+        if next != defaultZones { defaultZones = next; saveZones() }
+        if next != zones { zones = next }
     }
 
     /// Puts an agent in a window (nil = empty it). Whoever was there leaves; if the agent
-    /// was in the other window, the two swap.
+    /// was in the other window, the two swap. During a time of day, this changes that time's pair.
     func setWindow(_ zone: Zone, to id: UUID?) {
-        var next = zones
+        if let i = lineups.firstIndex(where: { $0.id == activeLineupId }) {
+            var l = lineups[i]
+            let other: Zone = zone == .left ? .right : .left
+            if let id, l[other] == id { l[other] = l[zone] }
+            l[zone] = id
+            lineups[i] = l
+            syncPlacement()
+            return
+        }
+        var next = defaultZones
         let occupant = next.first(where: { $0.value == zone })?.key
         if let id {
             if let old = next[id], let occupant, occupant != id { next[occupant] = old } else if let occupant { next[occupant] = nil }
@@ -735,7 +763,7 @@ final class MobileState {
             emptiedWindows.insert(zone)
         }
         UserDefaults.standard.set(emptiedWindows.map(\.rawValue), forKey: "emptiedWindows")
-        zones = next
+        defaultZones = next
         saveZones()
         syncPlacement()
     }
@@ -754,7 +782,68 @@ final class MobileState {
     var unzonedAgents: [Agent] { bodyAgents.filter { zones[$0.id] == nil } }
 
     private func saveZones() {
-        UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: zones.map { ($0.key.uuidString, $0.value.rawValue) }), forKey: "zones")
+        UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: defaultZones.map { ($0.key.uuidString, $0.value.rawValue) }), forKey: "zones")
+    }
+
+    // MARK: - Times of day
+
+    private func currentLineupId(at date: Date = Date()) -> UUID? {
+        let m = Lineup.minute(of: date)
+        return lineups.first { $0.contains(minute: m) }?.id
+    }
+
+    /// Switches pairs when a time of day starts or ends (not mid-conversation), and has the
+    /// new pair say hello from their sides.
+    private func checkLineup(force: Bool = false) {
+        guard force || Date().timeIntervalSince(lastLineupCheck) > 15 else { return }
+        lastLineupCheck = Date()
+        let next = currentLineupId()
+        guard next != activeLineupId else { return }
+        guard activeId == nil || force else { return }
+        activeLineupId = next
+        print("Agentsphere: time of day → \(activeLineup?.name ?? "usual pair")")
+        syncPlacement()
+        guard !force else { return }
+        haptics.light()
+        introducePair(activeLineup?.name)
+    }
+
+    /// "Evening. I'm Coach, on your left." then "And I'm Journal, on your right."
+    private func introducePair(_ name: String?) {
+        guard announce == .voice, headphonesIn, withMe else { return }
+        let left = agent(in: .left), right = agent(in: .right)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if let left {
+                self.audio.speak("\(name.map { "\($0). " } ?? "")I'm \(left.name), on your left.", from: left.id, prelude: .chime)
+                try? await Task.sleep(for: .seconds(0.6))
+                while self.audio.isSpeaking { try? await Task.sleep(for: .seconds(0.2)) }
+            }
+            if let right, self.activeId == nil {
+                self.audio.speak("\(left == nil ? name.map { "\($0). " } ?? "" : "And ")I'm \(right.name), on your right.", from: right.id, prelude: left == nil ? .chime : nil)
+            }
+        }
+    }
+
+    func saveLineup(_ l: Lineup) {
+        if let i = lineups.firstIndex(where: { $0.id == l.id }) { lineups[i] = l } else { lineups.append(l) }
+        refreshLineup()
+    }
+
+    func deleteLineup(_ id: UUID) {
+        lineups.removeAll { $0.id == id }
+        refreshLineup()
+    }
+
+    func deleteLineups(at offsets: IndexSet) {
+        lineups.remove(atOffsets: offsets)
+        refreshLineup()
+    }
+
+    /// After an edit: apply it now, quietly.
+    private func refreshLineup() {
+        activeLineupId = currentLineupId()
+        syncPlacement()
     }
 
     /// "This is forward": the current head direction becomes the front of your space.
@@ -867,6 +956,7 @@ final class MobileState {
         if !hasHeadData { updateScene() }   // phone heading drives focus without AirPods
         beaconTick()
         announceTick()
+        checkLineup()
 
         // Conversation housekeeping.
         guard let active = activeId else { return }
@@ -968,6 +1058,7 @@ final class MobileState {
         if isListeningNow { _ = speech.finish() }
         if !speech.keepsInputOpen { speech.shutdown() }
         if let id = activeId {
+            haptics.ended()
             asleep.insert(id)
             // Asleep for a while, then back to normal.
             Task { @MainActor [weak self] in
@@ -1037,6 +1128,7 @@ final class MobileState {
         guard let id = activeId else { return }
         let (onDevice, wav) = speech.finishWithAudio()
         let heard = onDevice.isEmpty ? transcript : onDevice
+        haptics.light()
         guard let wav else { send(heard); return }
         phase = .thinking
         Task { @MainActor [weak self] in
@@ -1126,6 +1218,7 @@ final class MobileState {
                         print("Agentsphere: tool \(call.name) -> \(output.prefix(300))")
                         if failed {
                             updateMessage(chip.id, of: id) { $0.kind = .tool(name: call.name + "!"); $0.text = AgentTool.failure(call.name) }
+                            haptics.failure()
                         }
                         toolNotes[chip.id] = "\(call.name) \(call.arguments) → \(output.prefix(240))"
                         history.append(["role": "tool", "tool_call_id": call.id, "content": output])
@@ -1146,6 +1239,7 @@ final class MobileState {
                 print("Agentsphere: reply failed: \(error.localizedDescription)")
                 self.updateMessage(placeholder.id, of: id) { $0.kind = .error; $0.text = error.localizedDescription }
                 self.failing.insert(id)
+                self.haptics.failure()
                 self.phase = .speaking
                 self.audio.speak("Sorry, I couldn't answer that.", from: id, prelude: .error)
             }
@@ -1171,9 +1265,11 @@ final class MobileState {
     func verifyWithWorld() async -> WorldAuth.Outcome {
         let outcome = await worldAuth.run(purpose: "verify_shop")
         print("Agentsphere: World ID verify: \(outcome)")
+        if case .failed = outcome { haptics.failure() }
+        if outcome == .denied { haptics.failure() }
         if outcome == .ok {
             await refreshIdentity()
-            haptics.arrived()
+            haptics.success()
             Task { await refreshNearby(force: true) }
         }
         return outcome
@@ -1200,6 +1296,7 @@ final class MobileState {
         } else if u.status == "paying" || liveOrder[agentId] == nil {
             let m = ChatMessage(.order, u.itemName ?? "Order")
             orders[m.id] = OrderCard(u)
+            haptics.light()
             post(m, to: agentId)
             liveOrder[agentId] = m.id
         }
@@ -1212,6 +1309,7 @@ final class MobileState {
         guard var card = orders[messageId], card.status == .needsApproval,
               let approval = card.approvalId, let itemId = card.itemId else { return }
         if phase == .listening { _ = speech.finish(); phase = .idle }
+        haptics.light()
         card.status = .approving
         orders[messageId] = card
         Task { @MainActor in
@@ -1246,13 +1344,17 @@ final class MobileState {
         let line: String
         switch card.status {
         case .paid:
-            haptics.arrived()
+            haptics.success()
             line = "Paid. \(card.title), \(Money.usd(card.amount))."
         case .needsApproval:
+            // Your approval is needed: make sure you feel it, phone in hand or pocket.
+            haptics.attention()
             line = "That's \(Money.usd(card.amount)), more than your wallet pays on its own. Approve it with World ID on your phone."
         case .denied, .cancelled:
+            haptics.ended()
             line = "No problem, nothing was paid."
         case .failed:
+            haptics.failure()
             line = "The payment didn't go through, so nothing was paid."
         case .paying, .approving:
             return

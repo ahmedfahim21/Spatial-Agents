@@ -16,6 +16,7 @@ struct WithMeView: View {
                         // The book and caption follow your head; they're their own views so
                         // the rest of the screen doesn't redraw as you turn.
                         VStack(spacing: 18) {
+                            TimeOfDayChip()
                             BookView()
                             Caption()
                         }
@@ -90,6 +91,35 @@ struct WithMeView: View {
             }
         }
         .card()
+    }
+}
+
+/// Which pair is in your windows: a time of day, or your usual pair. Opens the times.
+private struct TimeOfDayChip: View {
+    @Environment(MobileState.self) private var state
+
+    var body: some View {
+        NavigationLink {
+            LineupsView()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: state.activeLineup == nil ? "clock" : "clock.fill")
+                if let l = state.activeLineup {
+                    Text(l.name).fontWeight(.semibold)
+                    Text("until \(Lineup.clock(l.end))").foregroundStyle(.secondary)
+                } else {
+                    Text(state.lineups.isEmpty ? "Set pairs for times of day" : "Usual pair")
+                }
+                Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+            }
+            .font(.subheadline)
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .background(Color(.secondarySystemGroupedBackground), in: Capsule())
+        }
+        .buttonStyle(PressableStyle())
+        .frame(maxWidth: .infinity)
+        .padding(.bottom, -14)
     }
 }
 

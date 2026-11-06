@@ -22,6 +22,11 @@ struct SettingsView: View {
                     Button("Recenter") { state.calibrateForward() }
                         .disabled(!state.hasHeadData)
                     Button("Arrange your space") { arranging = true }
+                    NavigationLink {
+                        LineupsView()
+                    } label: {
+                        LabeledContent("Times of day", value: state.activeLineup?.name ?? (state.lineups.isEmpty ? "Off" : "Usual pair"))
+                    }
                 }
                 Section {
                     Picker("Nearby agents", selection: $state.announce) {
