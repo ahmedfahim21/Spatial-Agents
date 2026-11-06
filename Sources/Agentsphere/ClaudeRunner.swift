@@ -61,21 +61,32 @@ final class ShellEnvironment {
 }
 
 /// Runs one turn of a Claude Code session headlessly and returns its reply.
+/// Something Claude did mid-turn, streamed so the chat shows progress live.
+enum RunEvent {
+    case text(String)
+    case tool(name: String, detail: String)
+}
+
+/// Runs one turn of a Claude Code session headlessly and returns its reply.
+/// Uses stream-json so text and tool calls arrive as they happen.
 enum ClaudeRunner {
-    static func run(prompt: String, in dir: URL, resume: String?, fork: Bool = false, extraArgs: String, agentId: UUID) async -> ClaudeResult {
+    static func run(prompt: String, in dir: URL, resume: String?, fork: Bool = false, extraArgs: String, agentId: UUID,
+                    onEvent: @escaping (RunEvent) -> Void = { _ in }) async -> ClaudeResult {
         await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
-                cont.resume(returning: runSync(prompt: prompt, in: dir, resume: resume, fork: fork, extraArgs: extraArgs, agentId: agentId))
+                cont.resume(returning: runSync(prompt: prompt, in: dir, resume: resume, fork: fork, extraArgs: extraArgs,
+                                               agentId: agentId, onEvent: onEvent))
             }
         }
     }
 
-    private static func runSync(prompt: String, in dir: URL, resume: String?, fork: Bool, extraArgs: String, agentId: UUID) -> ClaudeResult {
+    private static func runSync(prompt: String, in dir: URL, resume: String?, fork: Bool, extraArgs: String, agentId: UUID,
+                                onEvent: @escaping (RunEvent) -> Void) -> ClaudeResult {
         guard let claude = ShellEnvironment.shared.claudeExecutable() else {
             return ClaudeResult(text: "I couldn't find the claude command. Install Claude Code first.", sessionId: nil, isError: true)
         }
 
-        var args = ["-p", prompt, "--output-format", "json"]
+        var args = ["-p", prompt, "--output-format", "stream-json", "--verbose"]
         if let resume {
             args += ["--resume", resume]
             if fork { args.append("--fork-session") }
@@ -105,21 +116,78 @@ enum ClaudeRunner {
         do { try p.run() } catch {
             return ClaudeResult(text: "Couldn't start Claude: \(error.localizedDescription)", sessionId: nil, isError: true)
         }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
+
+        var result: ClaudeResult?
+        var sessionId: String?
+        var lastText = ""
+        var pending = Data()
+        let reader = out.fileHandleForReading
+        func handle(line: Data) {
+            guard let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { return }
+            if let sid = obj["session_id"] as? String { sessionId = sid }
+            switch obj["type"] as? String {
+            case "assistant":
+                let blocks = ((obj["message"] as? [String: Any])?["content"] as? [[String: Any]]) ?? []
+                for b in blocks {
+                    switch b["type"] as? String {
+                    case "text":
+                        if let t = b["text"] as? String, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            lastText = t
+                            onEvent(.text(t))
+                        }
+                    case "tool_use":
+                        let name = (b["name"] as? String) ?? "Tool"
+                        onEvent(.tool(name: name, detail: ToolSummary.detail(name: name, input: b["input"] as? [String: Any] ?? [:])))
+                    default: break
+                    }
+                }
+            case "result":
+                let text = (obj["result"] as? String) ?? lastText
+                let isErr = (obj["is_error"] as? Bool) ?? false
+                let fallback = (obj["subtype"] as? String) ?? "Done."
+                result = ClaudeResult(text: text.isEmpty ? fallback : text, sessionId: sessionId, isError: isErr)
+            default: break
+            }
+        }
+        while true {
+            let chunk = reader.availableData
+            if chunk.isEmpty { break }
+            pending.append(chunk)
+            while let nl = pending.firstIndex(of: UInt8(ascii: "\n")) {
+                handle(line: pending[pending.startIndex..<nl])
+                pending.removeSubrange(pending.startIndex...nl)
+            }
+        }
+        if !pending.isEmpty { handle(line: pending) }
         p.waitUntilExit()
         err.fileHandleForReading.readabilityHandler = nil
 
-        if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            let text = (obj["result"] as? String) ?? ""
-            let sid = obj["session_id"] as? String
-            let isErr = (obj["is_error"] as? Bool) ?? (p.terminationStatus != 0)
-            let fallback = (obj["subtype"] as? String) ?? "Done."
-            return ClaudeResult(text: text.isEmpty ? fallback : text, sessionId: sid, isError: isErr)
+        if var r = result {
+            if p.terminationStatus != 0 && !r.isError { r.isError = true }
+            return r
         }
-
-        let raw = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         let stderr = errBox.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        return ClaudeResult(text: raw.isEmpty ? stderr : raw, sessionId: nil, isError: p.terminationStatus != 0)
+        return ClaudeResult(text: stderr.isEmpty ? (lastText.isEmpty ? "Claude exited without a reply." : lastText) : stderr,
+                            sessionId: sessionId, isError: p.terminationStatus != 0)
+    }
+}
+
+/// One-line descriptions of tool calls, shared by the chat and permission prompts.
+enum ToolSummary {
+    static func detail(name: String, input: [String: Any]) -> String {
+        func str(_ k: String) -> String { (input[k] as? String) ?? "" }
+        func file(_ k: String) -> String { (str(k) as NSString).lastPathComponent }
+        switch name {
+        case "Bash": return str("command")
+        case "Read", "Edit", "MultiEdit", "Write": return file("file_path")
+        case "NotebookEdit": return file("notebook_path")
+        case "Grep": return str("pattern")
+        case "Glob": return str("pattern")
+        case "WebFetch": return str("url")
+        case "WebSearch": return str("query")
+        case "Task": return str("description")
+        default: return ""
+        }
     }
 }
 

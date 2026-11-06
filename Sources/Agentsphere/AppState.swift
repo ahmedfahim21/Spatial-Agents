@@ -138,6 +138,19 @@ final class AppState: ObservableObject {
         appendLog(speaker: "Agentsphere", text: "Recentered: where you're looking is now the front.", fromUser: false)
     }
 
+    // MARK: - Chat
+
+    func post(_ m: ChatMessage, to agentId: UUID) {
+        guard let i = index(of: agentId) else { return }
+        sessions[i].messages.append(m)
+        if sessions[i].messages.count > 400 { sessions[i].messages.removeFirst(sessions[i].messages.count - 400) }
+    }
+
+    private func updateMessage(_ messageId: UUID, of agentId: UUID, _ change: (inout ChatMessage) -> Void) {
+        guard let i = index(of: agentId), let j = sessions[i].messages.firstIndex(where: { $0.id == messageId }) else { return }
+        change(&sessions[i].messages[j])
+    }
+
     // MARK: - Voice
 
     func saveElevenLabsKey() {
@@ -191,6 +204,7 @@ final class AppState: ObservableObject {
 
         pending.append(r)
         if let i = index(of: agent.id) { sessions[i].status = .asking }
+        post(ChatMessage(id: r.id, .permission(.asking), r.summary), to: agent.id)
         appendLog(speaker: name, text: "Asks: \(r.summary)  [\(r.hash.prefix(10))]", fromUser: false)
         announce(r)
 
@@ -241,6 +255,7 @@ final class AppState: ObservableObject {
         guard let i = pending.firstIndex(where: { $0.id == id }), pending[i].hash == hash else { return }
         let r = pending.remove(at: i)
         r.respond(allow, reason)
+        if let agentId = r.agentId { updateMessage(r.id, of: agentId) { $0.kind = .permission(allow ? .approved : .denied) } }
         if let agentId = r.agentId, let a = index(of: agentId) {
             if !pending.contains(where: { $0.agentId == agentId }) { sessions[a].status = .working }
             audio.ping(from: agentId, high: allow)
@@ -292,11 +307,22 @@ final class AppState: ObservableObject {
             s.title = d.title
         }
         place(s)
+        if !fresh { loadHistory(agentId: s.id, sessionId: d.sessionId) }
         appendLog(speaker: "Agentsphere",
                   text: fresh ? "New session in \(d.directory.path)."
                       : d.isLive ? "Attached to live session “\(d.title)” — it's open elsewhere, so the first turn forks it."
                       : "Resuming “\(d.title.isEmpty ? d.sessionId : d.title)”.",
                   fromUser: false)
+    }
+
+    private func loadHistory(agentId: UUID, sessionId: String) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let history = ChatHistory.load(sessionId: sessionId)
+            DispatchQueue.main.async {
+                guard let i = self.index(of: agentId) else { return }
+                self.sessions[i].messages = history + [ChatMessage(.note, "Attached to this session")] + self.sessions[i].messages
+            }
+        }
     }
 
     private func place(_ new: AgentSession) {
@@ -509,6 +535,7 @@ final class AppState: ObservableObject {
             return
         }
         sessions[i].status = .working
+        post(ChatMessage(.user, text), to: id)
         appendLog(speaker: "You → \(s.name)", text: text, fromUser: true)
         audio.ping(from: id, high: true)
 
@@ -517,7 +544,14 @@ final class AppState: ObservableObject {
         let dir = s.directory
         let args = extraArgs
         Task {
-            let result = await ClaudeRunner.run(prompt: text, in: dir, resume: resume, fork: fork, extraArgs: args, agentId: id)
+            let result = await ClaudeRunner.run(prompt: text, in: dir, resume: resume, fork: fork, extraArgs: args, agentId: id) { [weak self] event in
+                DispatchQueue.main.async {
+                    switch event {
+                    case .text(let t): self?.post(ChatMessage(.agent, t), to: id)
+                    case .tool(let name, let detail): self?.post(ChatMessage(.tool(name: name), detail), to: id)
+                    }
+                }
+            }
             await MainActor.run { self.finish(id: id, result: result) }
         }
     }
@@ -530,6 +564,12 @@ final class AppState: ObservableObject {
         }
         sessions[i].lastReply = result.text
         sessions[i].status = result.isError ? .error : .waiting
+        let lastAgentText = sessions[i].messages.last { $0.kind == .agent }?.text
+        if result.isError {
+            post(ChatMessage(.error, result.text), to: id)
+        } else if lastAgentText?.trimmingCharacters(in: .whitespacesAndNewlines) != result.text.trimmingCharacters(in: .whitespacesAndNewlines) {
+            post(ChatMessage(.agent, result.text), to: id)
+        }
         appendLog(speaker: sessions[i].name, text: result.text, fromUser: false)
         audio.speak(Summarizer.spoken(result.text, isError: result.isError), from: id)
     }
@@ -539,3 +579,7 @@ final class AppState: ObservableObject {
         if log.count > 200 { log.removeFirst(log.count - 200) }
     }
 }
+
+/// AppState is only mutated on the main queue (every background callback hops to main
+/// before touching it), so sharing the reference across closures is safe.
+extension AppState: @unchecked Sendable {}

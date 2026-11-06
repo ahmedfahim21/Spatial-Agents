@@ -16,7 +16,7 @@ struct AgentsphereApp: App {
         WindowGroup("Agentsphere") {
             ContentView()
                 .environmentObject(state)
-                .frame(minWidth: 960, minHeight: 620)
+                .frame(minWidth: 1180, minHeight: 680)
         }
         .windowResizability(.contentMinSize)
 
@@ -36,11 +36,15 @@ struct ContentView: View {
         HStack(spacing: 0) {
             RadarView()
                 .padding(24)
-                .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
+                .frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
             Divider()
-            ControlPanel()
-                .frame(width: 440)
+            ChatPanel()
+                .frame(minWidth: 380, idealWidth: 440, maxWidth: 560, maxHeight: .infinity)
+            Divider()
+            ScrollView { ControlPanel() }
+                .frame(width: 400)
         }
+        .sheet(isPresented: $state.showDiscover) { DiscoverSheet().environmentObject(state) }
     }
 }
 
@@ -310,11 +314,6 @@ struct ControlPanel: View {
                             Text(state.micName).font(.caption2).foregroundStyle(.tertiary)
                         }
                     }
-                    HStack {
-                        TextField("Or type an instruction", text: $state.typed)
-                            .onSubmit { state.sendTyped() }
-                        Button("Send") { state.sendTyped() }
-                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -356,27 +355,19 @@ struct ControlPanel: View {
                     .font(.system(.body, design: .monospaced))
             }
 
-            Text("Log").font(.headline)
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(state.log) { entry in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(entry.speaker).font(.caption.bold())
-                                    .foregroundStyle(entry.fromUser ? Color.accentColor : .primary)
-                                Text(entry.text).font(.callout).textSelection(.enabled)
-                            }
-                            .id(entry.id)
+            DisclosureGroup("Activity (\(state.log.count))") {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(state.log.suffix(60)) { entry in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(entry.speaker).font(.caption.bold())
+                                .foregroundStyle(entry.fromUser ? Color.accentColor : .primary)
+                            Text(entry.text).font(.caption).textSelection(.enabled)
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .onChange(of: state.log.count) { _, _ in
-                    if let last = state.log.last { proxy.scrollTo(last.id, anchor: .bottom) }
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .padding(18)
-        .sheet(isPresented: $state.showDiscover) { DiscoverSheet().environmentObject(state) }
     }
 }

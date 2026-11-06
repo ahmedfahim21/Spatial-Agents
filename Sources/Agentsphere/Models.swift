@@ -24,6 +24,33 @@ struct AgentSession: Identifiable, Equatable {
     var title = ""
     var status: AgentStatus = .idle
     var lastReply: String = ""
+    /// The conversation shown in the chat panel.
+    var messages: [ChatMessage] = []
+}
+
+/// One line in an agent's chat.
+struct ChatMessage: Identifiable, Equatable {
+    enum Kind: Equatable {
+        case user
+        case agent
+        case tool(name: String)
+        case permission(PermissionState)
+        case note
+        case error
+    }
+    enum PermissionState: Equatable { case asking, approved, denied }
+
+    let id: UUID
+    var kind: Kind
+    var text: String
+    let date: Date
+
+    init(id: UUID = UUID(), _ kind: Kind, _ text: String, date: Date = Date()) {
+        self.id = id
+        self.kind = kind
+        self.text = text
+        self.date = date
+    }
 }
 
 /// Head orientation, ~25 updates a second. Kept out of AppState so only the views that
