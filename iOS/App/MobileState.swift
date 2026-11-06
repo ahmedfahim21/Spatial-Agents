@@ -70,6 +70,8 @@ final class MobileState {
     /// The agent said something like "Let me check." and is waiting on a tool: when that
     /// line finishes, keep thinking rather than start listening.
     @ObservationIgnored private var awaitingTools = false
+    /// A reply is still arriving: more sentences may come, so a pause in speech isn't the end.
+    @ObservationIgnored private var replyArriving = false
     /// Your World ID verification (a verified human), once you've done it.
     private(set) var worldIdentity: WorldIdentity?
     @ObservationIgnored private let worldAuth = WorldAuth()
@@ -766,10 +768,14 @@ final class MobileState {
 
     private func speakingChanged(_ speaking: Bool) {
         if speaking {
-            if phase == .listening, transcript.isEmpty { _ = speech.finish() }
+            // An agent talking over an idle mic: stop listening for now, and pick it up again
+            // when it's done (as .speaking, so the end of speech restarts listening).
+            if phase == .listening, transcript.isEmpty { _ = speech.finish(); phase = .speaking }
             return
         }
         if awaitingTools, phase == .speaking { phase = .thinking; return }
+        // More of the reply is still on its way.
+        if replyArriving { return }
         // The agent finished: your turn.
         if activeId != nil, phase == .greeting || phase == .speaking { startListening() }
     }
@@ -861,6 +867,7 @@ final class MobileState {
 
         let placeholder = ChatMessage(.agent, "")
         post(placeholder, to: id)
+        replyArriving = true
         let reply = ReplySpeaker(state: self, agentId: id, messageId: placeholder.id)
         let allowed = toolAccess(a)
         let client = ["now": PhoneTools.now, "timezone": TimeZone.current.identifier]
@@ -914,6 +921,7 @@ final class MobileState {
                 DispatchQueue.main.async { MainActor.assumeIsolated { reply.finish(empty: full.isEmpty) } }
             } catch {
                 self.awaitingTools = false
+                self.replyArriving = false
                 print("Agentsphere: reply failed: \(error.localizedDescription)")
                 self.updateMessage(placeholder.id, of: id) { $0.kind = .error; $0.text = error.localizedDescription }
                 self.failing.insert(id)
@@ -1043,7 +1051,9 @@ final class MobileState {
     fileprivate func replyDone(spokeAny: Bool, empty: Bool, messageId: UUID, agentId: UUID) {
         print("Agentsphere: reply done (\(messages(for: agentId).last?.text.count ?? 0) chars)")
         if empty { updateMessage(messageId, of: agentId) { $0.text = "…" } }
-        if !spokeAny, activeId == agentId { startListening() }
+        replyArriving = false
+        // Your turn once the last sentence has played (or now, if it already has).
+        if activeId == agentId, !audio.isSpeaking { startListening() }
     }
 
     /// End index of the next complete sentence in `s` (or everything left when final).

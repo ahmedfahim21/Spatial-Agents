@@ -24,13 +24,17 @@ final class SpatialAudio: AgentAudio {
     /// Called on the main queue when agents start or stop talking (any agent).
     var onSpeakingChanged: ((Bool) -> Void)?
     var beforeSpeaking: (() -> Bool)?
+    /// Lines queued or playing. Counted from when a line is queued, not when it starts, so a
+    /// reply's sentences don't read as "stopped talking" in the gaps between them.
     private var speakingCount = 0
+    var isSpeaking: Bool { speakingCount > 0 }
     private func speakingDelta(_ d: Int) {
-        DispatchQueue.main.async {
+        let apply = {
             let was = self.speakingCount > 0
             self.speakingCount = max(0, self.speakingCount + d)
             if was != (self.speakingCount > 0) { self.onSpeakingChanged?(self.speakingCount > 0) }
         }
+        if Thread.isMainThread { apply() } else { DispatchQueue.main.async(execute: apply) }
     }
 
     var headYaw: Double = 0 { didSet { updatePositions() } }
@@ -200,11 +204,11 @@ final class SpatialAudio: AgentAudio {
         let previous = speechTail[id]
         let target = format
         let preludeBuffer = prelude.flatMap { AudioConvert.cue($0, format: target) }
+        speakingDelta(1)
         speechTail[id] = Task { [weak self] in
+            defer { self?.speakingDelta(-1) }
             await previous?.value
             guard let self, !Task.isCancelled else { return }
-            self.speakingDelta(1)
-            defer { self.speakingDelta(-1) }
             // If this line closed the AirPods mic, hold playback until they're back in stereo.
             let releasedMic = await MainActor.run { self.beforeSpeaking?() ?? false }
             let gate = PlaybackGate(open: !releasedMic) { [weak self] in self?.enqueue($0, on: player) }
