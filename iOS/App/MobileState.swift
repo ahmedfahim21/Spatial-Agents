@@ -138,9 +138,10 @@ final class MobileState {
                 return (id, z)
             })
         }
-        // A calibrated layout shouldn't swing round because you looked at a side agent
-        // for a while: only re-center after a clear, long turn (or when walking).
-        tracker.configureRecenter(angle: 80, delay: 10)
+        // Once you've set forward, agents stay put: turn right and the one on your right is
+        // in front of you. No drift, no re-centering after a long look, no following while
+        // walking. Only Recenter (calibrateForward) moves "front".
+        tracker.followMe = false
         tracker.onStatus = { [weak self] s in
             print("Agentsphere: tracking status: \(s)")
             self?.trackingStatus = s
