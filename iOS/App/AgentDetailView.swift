@@ -8,6 +8,9 @@ struct AgentDetailView: View {
     @State private var finding = false
     @State private var confirmDelete = false
     @State private var menu: [CatalogItem] = []
+    @State private var sales: [Sale] = []
+    @State private var balance: Double?
+    @State private var editing = false
 
     var body: some View {
         if let agent = state.agent(agentId) {
@@ -44,9 +47,15 @@ struct AgentDetailView: View {
                                     RowDivider(); row("Distance", Words.distance(d))
                                 }
                             }
-                            RowDivider(); row("Price", agent.pricing == "paid" ? "Paid" : "Free")
+                            if agent.isPublic {
+                                RowDivider(); row("Payments", agent.pricing == "paid" ? "On" : "Off")
+                            }
                         }
                         .card()
+                    }
+
+                    if agent.pricing == "paid", let account = agent.walletAddress {
+                        shop(account)
                     }
 
                     if !menu.isEmpty {
@@ -102,16 +111,80 @@ struct AgentDetailView: View {
                 Text("It disappears for everyone. This can't be undone.")
             }
             .fullScreenCover(isPresented: $finding) { FindView(agentId: agent.id) }
-            .task(id: agent.pricing) {
-                guard agent.pricing == "paid" else { return }
-                menu = (try? await Backend.shared.catalog(agentId: agent.id)) ?? []
+            .toolbar {
+                if state.owns(agent.id) {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Edit") { editing = true }.fontWeight(.semibold)
+                    }
+                }
+            }
+            .sheet(isPresented: $editing) { EditAgentView(agent: agent) }
+            // Reloads after an edit too (pricing or the wallet can change).
+            .task(id: "\(agent.pricing)\(agent.walletAddress ?? "")\(editing)") {
+                guard !editing else { return }
+                await loadShop(agent)
+            }
+            .refreshable { await loadShop(agent) }
+        }
+    }
+
+    private func loadShop(_ a: Agent) async {
+        guard a.pricing == "paid" else { menu = []; sales = []; balance = nil; return }
+        async let items = try? Backend.shared.catalog(agentId: a.id)
+        async let sold = state.owns(a.id) ? (try? Backend.shared.sales(agentId: a.id)) : nil
+        async let held = balance(of: a.walletAddress)
+        menu = await items ?? []
+        sales = await sold ?? []
+        balance = await held
+    }
+
+    private func balance(of account: String?) async -> Double? {
+        guard let account else { return nil }
+        return await Backend.shared.usdcBalance(account: account)
+    }
+
+    /// The shop's own Hedera wallet and what it has sold.
+    private func shop(_ account: String) -> some View {
+        VStack(spacing: 8) {
+            SectionLabel("Shop")
+            VStack(spacing: 0) {
+                HStack {
+                    Text("Wallet")
+                    Spacer()
+                    if let url = HashScan.account(account) {
+                        Link(destination: url) {
+                            HStack(spacing: 4) {
+                                Text(account).monospacedDigit()
+                                Image(systemName: "arrow.up.right").font(.caption.weight(.semibold))
+                            }
+                        }
+                        .tint(.blue)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .frame(minHeight: 46)
+                RowDivider(); row("Balance", balance.map { "\(Money.usd($0)) USDC" } ?? "–")
+                if state.owns(agentId) {
+                    RowDivider(); row("Sold", sales.isEmpty ? "Nothing yet" : "\(sales.count) · \(Money.usd(sales.reduce(0) { $0 + $1.amountUsdc }))")
+                }
+            }
+            .card()
+
+            if !sales.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(sales.enumerated()), id: \.element.id) { i, sale in
+                        if i > 0 { RowDivider() }
+                        SaleRow(sale: sale)
+                    }
+                }
+                .card()
             }
         }
     }
 
     private func subtitle(_ a: Agent) -> String {
         var parts = [a.isPublic ? "Public" : "Private"]
-        if a.isPublic { parts.append(a.pricing == "paid" ? "Paid" : "Free") }
+        if a.isPublic { parts.append(a.pricing == "paid" ? "Shop" : "Free") }
         if a.isGeo {
             if let d = state.distance(to: a) { parts.append("\(Words.distance(d)) away") }
         } else {
@@ -149,5 +222,37 @@ struct AgentDetailView: View {
         }
         .padding(.horizontal, 16)
         .frame(minHeight: 46)
+    }
+}
+
+/// One sale: what, how much, when, and its receipt on HashScan.
+private struct SaleRow: View {
+    let sale: Sale
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(sale.qty > 1 ? "\(sale.qty) × \(sale.itemName)" : sale.itemName)
+                HStack(spacing: 4) {
+                    if let d = sale.date { Text(d, format: .relative(presentation: .named)) }
+                    if sale.checkpoint {
+                        Text("·")
+                        Image(systemName: "checkmark.seal.fill").foregroundStyle(.white, .blue)
+                        Text("approved")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(Money.usd(sale.amountUsdc)).monospacedDigit()
+            if let url = sale.receiptURL {
+                Link(destination: url) { Image(systemName: "arrow.up.right.square") }
+                    .tint(.blue)
+                    .accessibilityLabel("Receipt on HashScan")
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 52)
     }
 }
