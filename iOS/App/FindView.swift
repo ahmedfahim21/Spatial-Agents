@@ -165,7 +165,7 @@ private struct ArrowShape: Shape {
     }
 }
 
-// MARK: - Arrived: stare to talk
+// MARK: - Arrived: look, then nod
 
 private struct ArrivedStage: View {
     @Environment(MobileState.self) private var state
@@ -189,7 +189,7 @@ private struct ArrivedStage: View {
 
             Spacer()
             ZStack {
-                StareRing(progress: focused ? state.stareProgress : 0, diameter: 212)
+                FocusRing(active: focused, diameter: 212)
                 BotView(agent: agent, mood: state.mood(for: agent), size: 160, look: state.look(for: agent))
             }
             VStack(spacing: 6) {
@@ -200,14 +200,14 @@ private struct ArrivedStage: View {
                     if !state.hasHeadData {
                         Text("Tap Talk to start")
                     } else if focused {
-                        Text("Keep looking")
+                        Text("Nod to talk")
                     } else {
                         Text("Look toward \(agent.name)")
                     }
                 }
                 .font(.headline)
                 .contentTransition(.opacity)
-                Text(state.hasHeadData ? "Look away and the ring resets" : "Put in your AirPods to talk hands-free")
+                Text(state.hasHeadData ? "Shake your head to end the conversation" : "Put in your AirPods to talk hands-free")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }

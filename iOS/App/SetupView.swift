@@ -117,7 +117,7 @@ struct SetupView: View {
         VStack(spacing: 14) {
             VStack(spacing: 4) {
                 Text("Try looking around").font(.title2.bold())
-                Text("Each agent notices when your gaze lands on it. Later, hold your gaze for three seconds to talk.")
+                Text("Each agent notices when your gaze lands on it. Later, look at one and nod to talk.")
                     .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             .padding(.top, 18)

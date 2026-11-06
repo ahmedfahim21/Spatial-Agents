@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Your personal agents, arranged around your head. Look at one for three seconds to talk.
+/// Your personal agents, arranged around your head. Look at one and nod to talk.
 struct WithMeView: View {
     @Environment(MobileState.self) private var state
     @State private var arranging = false
@@ -65,8 +65,8 @@ struct WithMeView: View {
         let active = state.agent(state.activeId)
         let title: String = {
             if let active { return "Talking to \(active.name)" }
-            if let focused { return "Keep looking to wake \(focused.name)" }
-            if state.hasHeadData { return "Look toward an agent to wake it" }
+            if let focused { return "Nod to talk to \(focused.name)" }
+            if state.hasHeadData { return "Look at an agent, then nod" }
             return "Put in your AirPods to look around"
         }()
         return VStack(spacing: 4) {
@@ -74,7 +74,7 @@ struct WithMeView: View {
                 .font(.headline)
                 .contentTransition(.opacity)
             Text(state.hasHeadData ? "Facing \(Int(normalize360(state.headYaw)))° · AirPods head tracking"
-                                   : "They'll sit around your head. Turn to one and hold your gaze to talk.")
+                                   : "They'll sit around your head. Turn to one and nod to talk.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
@@ -155,10 +155,7 @@ private struct Radar: View {
         let size: CGFloat = zone.isUpper ? 42 : 52
         let focused = state.focusedId == agent.id
         return ZStack {
-            if focused {
-                StareRing(progress: state.stareProgress, diameter: size + 14, lineWidth: 3)
-                    .transition(.opacity)
-            }
+            FocusRing(active: focused, diameter: size + 14, lineWidth: 3, showsTrack: false)
             BotView(agent: agent, mood: state.mood(for: agent), size: size, look: -sin(a))
             if zone.isUpper {
                 Image(systemName: "arrow.up")

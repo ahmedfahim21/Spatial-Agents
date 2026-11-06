@@ -44,9 +44,7 @@ struct SpaceStage: View {
             ZStack {
                 if let a = agent {
                     let focused = state.focusedId == a.id && !editing
-                    if focused {
-                        StareRing(progress: state.stareProgress, diameter: 74, lineWidth: 3)
-                    }
+                    FocusRing(active: focused, diameter: 74, lineWidth: 3, showsTrack: false)
                     BotView(agent: a, mood: editing ? .idle : state.mood(for: a), size: 58)
                         .draggable(a.id.uuidString) { BotView(agent: a, size: 58) }
                         .onTapGesture { if editing { state.preview(a.id) } else { state.wake(a) } }

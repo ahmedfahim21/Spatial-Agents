@@ -242,20 +242,23 @@ struct BotBody: Shape {
     }
 }
 
-/// The stare ring: a light track and an ink arc that fills over three seconds.
-struct StareRing: View {
-    let progress: Double
+/// The focus ring: a light track, and an ink ring that draws itself round when you look at
+/// the agent (it's listening for your nod) and unwinds when you look away.
+struct FocusRing: View {
+    let active: Bool
     var diameter: CGFloat
     var lineWidth: CGFloat = 5
+    /// Show the grey track when not focused.
+    var showsTrack = true
 
     var body: some View {
         ZStack {
-            Circle().stroke(Color(.systemGray5), lineWidth: lineWidth)
+            if showsTrack { Circle().stroke(Color(.systemGray5), lineWidth: lineWidth) }
             Circle()
-                .trim(from: 0, to: progress)
+                .trim(from: 0, to: active ? 1 : 0)
                 .stroke(Color.primary, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-                .animation(.linear(duration: 0.12), value: progress)
+                .animation(active ? .easeOut(duration: 0.28) : .easeIn(duration: 0.18), value: active)
         }
         .frame(width: diameter, height: diameter)
     }

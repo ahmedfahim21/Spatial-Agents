@@ -26,8 +26,8 @@ struct OnboardingView: View {
 
             TabView(selection: $page) {
                 IntroPage(art: AnyView(LookArt()),
-                          title: "Look at an agent to talk",
-                          text: "Face it for three seconds. When the ring fills it says hello, and you can just talk.")
+                          title: "Look, then nod",
+                          text: "Turn toward an agent and it lights up. Nod and it says hello, then just talk. Shake your head to end.")
                     .tag(0)
                 IntroPage(art: AnyView(FindArt()),
                           title: "Find agents around you",
@@ -90,19 +90,41 @@ private struct IntroPage: View {
     }
 }
 
-/// The ring fills over three seconds; the bot wakes with a hop; repeat.
+/// The loop: you look (the ring draws round), you nod (a little nod badge), it wakes with a hop.
 private struct LookArt: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion)) { ctx in
-            let t = reduceMotion ? 2.0 : ctx.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 5)
-            let fill = min(1, t / 3)
+            let t = reduceMotion ? 1.5 : ctx.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 5.5)
+            let looking = t > 0.8 && t < 4.8
+            let nodding = t > 2.0 && t < 2.9
             ZStack {
-                StareRing(progress: t < 3 ? fill : 1, diameter: 176, lineWidth: 5)
-                    .opacity(t < 4.4 ? 1 : 0.0)
-                BotView(color: .cyan, shape: .circle, mood: t < 3 ? .focused : .awake, size: 132)
+                FocusRing(active: looking, diameter: 176, lineWidth: 5)
+                BotView(color: .cyan, shape: .circle, mood: t < 0.8 ? .idle : t < 2.9 ? .focused : .awake, size: 132)
+                NodBadge(nodding: nodding)
+                    .offset(x: 70, y: 70)
+                    .opacity(nodding ? 1 : 0)
+                    .animation(Motion.snappy, value: nodding)
             }
         }
+    }
+}
+
+/// A small head that dips once: "nod".
+private struct NodBadge: View {
+    let nodding: Bool
+    var body: some View {
+        Image(systemName: "person.fill")
+            .font(.system(size: 18, weight: .semibold))
+            .foregroundStyle(Color(.systemBackground))
+            .frame(width: 40, height: 40)
+            .background(Color.primary, in: Circle())
+            .keyframeAnimator(initialValue: 0.0, trigger: nodding) { content, tilt in
+                content.rotation3DEffect(.degrees(tilt), axis: (x: 1, y: 0, z: 0))
+            } keyframes: { _ in
+                SpringKeyframe(28, duration: 0.18, spring: .snappy)
+                SpringKeyframe(0, duration: 0.3, spring: .snappy)
+            }
     }
 }
 

@@ -104,7 +104,7 @@ struct AgentDetailView: View {
 
     private func shareText(_ a: Agent) -> String {
         a.isGeo && a.isPublic
-            ? "Come find \(a.name) on Agentsphere. Look at it for three seconds and it'll talk to you."
+            ? "Come find \(a.name) on Agentsphere. Look at it and nod, and it'll talk to you."
             : "I've got \(a.name) on Agentsphere: an agent that sits around my head and talks when I look at it."
     }
 

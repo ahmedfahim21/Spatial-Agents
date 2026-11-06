@@ -10,7 +10,7 @@ enum ConversationPhase: Equatable {
 /// The phone app's brain. Two kinds of agents share one spatial scene:
 /// - body-anchored agents sit in a ring around you and travel with you (BodyFollower frame);
 /// - geo-anchored agents sit where they are in the world (compass frame), once you've arrived.
-/// Look at one for 3 seconds and it wakes up; then you talk hands-free.
+/// Look at one and it lights up; nod and it wakes; then you talk hands-free. Shake to end.
 @Observable @MainActor
 final class MobileState {
     let voices = VoiceRouter()
@@ -34,8 +34,6 @@ final class MobileState {
     private(set) var arrived: Set<UUID> = []
 
     private(set) var focusedId: UUID?
-    /// 0…1 while you hold your gaze on the focused agent.
-    private(set) var stareProgress: Double = 0
     /// Head direction: yaw relative to your body (+ = right) and raw pitch, degrees.
     private(set) var headYaw: Double = 0
     private(set) var headPitchRaw: Double = 0
@@ -98,6 +96,9 @@ final class MobileState {
     /// Geo agents' bearings, frozen when close or when GPS is poor so they don't jitter.
     private var lockedBearing: [UUID: Double] = [:]
     @ObservationIgnored private var lastFocusAt = Date()
+    /// The agent you were looking at just before focus moved, and when it moved. A nod
+    /// tips your gaze up and down, which can slide focus for a moment mid-gesture.
+    @ObservationIgnored private var previousFocus: (id: UUID, held: TimeInterval, lostAt: Date)?
     @ObservationIgnored private var lookAwaySince: Date?
     @ObservationIgnored private var lastHeardAt = Date()
     @ObservationIgnored private var listenStartedAt = Date()
@@ -473,7 +474,7 @@ final class MobileState {
         return zone.elevation - headPitch
     }
 
-    /// Agents you can stare at right now.
+    /// Agents you can look at and wake right now.
     var talkable: [Agent] {
         (withMe ? bodyAgents.filter { zones[$0.id] != nil } : []) + nearby.filter { arrived.contains($0.id) }
     }
@@ -507,8 +508,10 @@ final class MobileState {
         }
         if next != focusedId {
             print("Agentsphere: focus → \(agent(next)?.name ?? "nobody") (yaw \(Int(yawBody))°, pitch \(Int(headPitch))°)")
+            if let cur = focusedId {
+                previousFocus = (cur, Date().timeIntervalSince(lastFocusAt), Date())
+            }
             focusedId = next
-            stareProgress = 0
             lastFocusAt = Date()
             if let n = next, n != activeId {
                 audio.ping(from: n, high: false)
@@ -529,15 +532,6 @@ final class MobileState {
         }
         if !hasHeadData { updateScene() }   // phone heading drives focus without AirPods
         beaconTick()
-
-        // Stare to wake: 3 s of steady attention.
-        if let f = focusedId, f != activeId, !arranging {
-            let p = min(1, Date().timeIntervalSince(lastFocusAt) / 3)
-            if p != stareProgress { stareProgress = p }
-            if p >= 1, let a = agent(f) { wake(a) }
-        } else if stareProgress != 0 {
-            stareProgress = 0
-        }
 
         // Conversation housekeeping.
         guard let active = activeId else { return }
@@ -567,12 +561,11 @@ final class MobileState {
         conversations[id, default: []].append(m)
     }
 
-    /// Starts talking with an agent (after a stare, or a tap).
+    /// Starts talking with an agent (after a nod, or a tap).
     func wake(_ a: Agent) {
         print("Agentsphere: wake \(a.name)")
         if activeId != nil, activeId != a.id { endConversation() }
         activeId = a.id
-        stareProgress = 0
         lookAwaySince = nil
         asleep.remove(a.id)
         failing.remove(a.id)
@@ -729,8 +722,25 @@ final class MobileState {
 
     private func handleGesture(_ g: HeadGesture) {
         lastGesture = g
-        // Shake while talking: stop this conversation.
-        if g == .shake, activeId != nil { endConversation() }
+        switch g {
+        case .shake:
+            // Shake while talking: stop this conversation.
+            if activeId != nil { endConversation() }
+        case .nod:
+            // Nod at the agent you're looking at: wake it.
+            guard !arranging, let target = nodTarget, target != activeId, let a = agent(target) else { return }
+            wake(a)
+        }
+    }
+
+    /// Who a nod is meant for: the agent you were settled on as the nod began. If the nod
+    /// itself slid focus off it (or onto a neighbour), that one still counts.
+    private var nodTarget: UUID? {
+        if let p = previousFocus, p.held > 0.4, Date().timeIntervalSince(p.lostAt) < 1.2,
+           focusedId == nil || Date().timeIntervalSince(lastFocusAt) < 1.2 {
+            return p.id
+        }
+        return focusedId
     }
 
     // MARK: - Misc
@@ -859,7 +869,6 @@ extension MobileState {
         case "focus":
             hasHeadData = true
             focusedId = myAgents[0].id
-            stareProgress = 0.6
         case "talk":
             activeId = helpDesk.id
             phase = .listening
