@@ -1,5 +1,6 @@
 // Speech to text for what you say to an agent: Whisper Large v3 on the 0G Compute Router.
 // POST a WAV (16 kHz mono is plenty) as the body; returns {"text": "..."}.
+// ?private=1 pins the request to 0G's private tier, for agents that run on it.
 import { admin, caller, cors, json } from "../_shared/common.ts";
 
 const ROUTER = "https://router-api.0g.ai/v1/audio/transcriptions";
@@ -22,13 +23,15 @@ Deno.serve(async (req) => {
   if (audio.length < 1000) return json({ error: "No audio" }, 400);
   if (audio.length > MAX_BYTES) return json({ error: "Too long" }, 413);
 
+  const url = new URL(req.url);
   const form = new FormData();
   form.append("file", new Blob([audio], { type: "audio/wav" }), "speech.wav");
   form.append("model", MODEL);
-  form.append("language", new URL(req.url).searchParams.get("language") ?? "en");
+  form.append("language", url.searchParams.get("language") ?? "en");
   form.append("response_format", "json");
 
-  const r = await fetch(ROUTER, { method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form });
+  const trust: Record<string, string> = url.searchParams.get("private") === "1" ? { "X-0G-Provider-Trust-Mode": "private" } : {};
+  const r = await fetch(ROUTER, { method: "POST", headers: { Authorization: `Bearer ${key}`, ...trust }, body: form });
   const body = await r.text();
   const ms = Math.round(performance.now() - t0);
   if (!r.ok) {
