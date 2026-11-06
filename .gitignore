@@ -4,3 +4,4 @@ build/
 iOS/build/
 iOS/**/xcuserdata/
 *.xcuserstate
+supabase/.temp/
