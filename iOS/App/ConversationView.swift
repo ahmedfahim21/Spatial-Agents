@@ -73,7 +73,8 @@ private struct MessageList: View {
 
     var body: some View {
         let messages = state.messages(for: agent.id)
-        let hearing = state.activeId == agent.id && state.phase == .listening && !state.transcript.isEmpty
+        // Also while Whisper finishes the transcript (thinking, words not sent yet).
+        let hearing = state.activeId == agent.id && (state.phase == .listening || state.phase == .thinking) && !state.transcript.isEmpty
         ScrollView {
             LazyVStack(spacing: 8) {
                 ForEach(messages) { m in

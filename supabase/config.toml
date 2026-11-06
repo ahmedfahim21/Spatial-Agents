@@ -12,6 +12,9 @@ verify_jwt = false
 [functions.tts]
 verify_jwt = false
 
+[functions.stt]
+verify_jwt = false
+
 # Payments. shop is paid for with x402 (no sign-in) and world/callback is World's redirect;
 # merchant and pay check the session themselves like chat.
 [functions.shop]

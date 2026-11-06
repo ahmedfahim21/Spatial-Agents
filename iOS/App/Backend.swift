@@ -214,11 +214,33 @@ final class Backend: @unchecked Sendable {
         return full
     }
 
-    /// Wakes the chat function (and its auth key cache) before you speak, to hide cold starts.
+    /// Wakes the chat and speech-to-text functions (and the auth key cache) before you speak,
+    /// to hide cold starts.
     func warmUp() {
         Task {
             guard let req = try? await functionRequest("chat", body: ["warm": true]) else { return }
             _ = try? await URLSession.shared.data(for: req)
+        }
+        Task {
+            guard var req = try? await functionRequest("stt") else { return }
+            req.httpMethod = "POST"
+            _ = try? await URLSession.shared.data(for: req)
+        }
+    }
+
+    /// What you said, by Whisper Large v3 on the 0G router. Nil if it fails or takes too long.
+    func transcribe(_ wav: Data, timeout: TimeInterval) async -> String? {
+        guard var req = try? await functionRequest("stt") else { return nil }
+        req.httpMethod = "POST"
+        req.timeoutInterval = timeout
+        req.setValue("audio/wav", forHTTPHeaderField: "Content-Type")
+        do {
+            let (data, response) = try await URLSession.shared.upload(for: req, from: wav)
+            try check(response, data)
+            return (try JSONSerialization.jsonObject(with: data) as? [String: Any])?["text"] as? String
+        } catch {
+            print("Agentsphere: whisper failed: \(error.localizedDescription)")
+            return nil
         }
     }
 

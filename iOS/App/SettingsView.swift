@@ -23,6 +23,13 @@ struct SettingsView: View {
                     LabeledContent("Voices", value: state.voiceStatus.isEmpty ? "Ready" : state.voiceStatus)
                 }
                 Section {
+                    Toggle("Whisper on 0G", isOn: $state.whisper).tint(.green)
+                } header: { Text("Speech recognition") } footer: {
+                    Text(state.whisper
+                         ? "What you say is transcribed by Whisper Large v3 on the 0G network: more accurate, about 3 seconds slower."
+                         : "What you say is transcribed on your iPhone: instant, but less accurate.")
+                }
+                Section {
                     LabeledContent("Accuracy", value: loc.coordinate == nil ? "–" : "±\(Int(loc.accuracy)) m")
                     LabeledContent("Heading", value: loc.heading.map { "\(Int($0))° \(Words.compassShort($0))" } ?? "–")
                     Toggle("Demo mode", isOn: Binding(get: { loc.simulated != nil }, set: { state.setDemoMode($0) }))

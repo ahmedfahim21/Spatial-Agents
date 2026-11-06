@@ -30,6 +30,10 @@ final class MobileState {
 
     /// Body-anchored agents are around you.
     var withMe = true { didSet { syncPlacement() } }
+    /// What you say is transcribed by Whisper on 0G (more accurate); off = on-device only (instant).
+    var whisper = UserDefaults.standard.object(forKey: "whisper") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(whisper, forKey: "whisper") }
+    }
     var findTargetId: UUID? { didSet { if oldValue != findTargetId { findTargetChanged() } } }
     private(set) var arrived: Set<UUID> = []
     /// Shops' menus, fetched when you arrive at one (shown over it on the map).
@@ -650,7 +654,7 @@ final class MobileState {
         if idle, let since = lookAwaySince, Date().timeIntervalSince(since) > 5 { endConversation(); return }
         if phase == .listening {
             if !transcript.isEmpty, Date().timeIntervalSince(lastHeardAt) > 1.3 {
-                send(transcript)
+                finishUtterance()
             } else if transcript.isEmpty, Date().timeIntervalSince(listenStartedAt) > 40 {
                 endConversation()
             }
@@ -733,6 +737,7 @@ final class MobileState {
         transcript = ""
         lastHeardAt = Date()
         listenStartedAt = Date()
+        speech.recordsAudio = whisper && Config.isConfigured && !offline
         speech.begin { [weak self] error in
             guard let self else { return }
             if let error {
@@ -752,6 +757,25 @@ final class MobileState {
         guard phase == .listening else { return }
         transcript = text
         lastHeardAt = Date()
+    }
+
+    /// You stopped talking. On-device recognition showed your words as you spoke and noticed
+    /// the pause; Whisper on 0G has the final say on what you said, with the on-device text as
+    /// the fallback if it's slow or fails.
+    private func finishUtterance() {
+        guard let id = activeId else { return }
+        let (onDevice, wav) = speech.finishWithAudio()
+        let heard = onDevice.isEmpty ? transcript : onDevice
+        guard let wav else { send(heard); return }
+        phase = .thinking
+        Task { @MainActor [weak self] in
+            let started = Date()
+            let whisper = await self?.backend.transcribe(wav, timeout: 6)
+            guard let self, self.activeId == id, self.phase == .thinking else { return }
+            let text = whisper?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            print("Agentsphere: whisper (\(Int(Date().timeIntervalSince(started) * 1000)) ms): \(text.isEmpty ? "–" : text) | on-device: \(heard)")
+            self.send(text.isEmpty ? heard : text, to: id)
+        }
     }
 
     /// Typed message (or a finished utterance).

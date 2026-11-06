@@ -45,6 +45,14 @@ final class SpeechInput {
     /// Called on the main queue with the running transcript.
     var onPartial: ((String) -> Void)?
 
+    /// Also keep each utterance's audio (16 kHz mono 16-bit), for transcribing on a server.
+    var recordsAudio = false
+    private static let pcmFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true)!
+    /// About 60 s; longer utterances keep only the start (guarded by requestLock).
+    private static let maxRecorded = 1_920_000
+    private var recorded = Data()
+    private var recording = false
+
     /// Asks for mic + speech permission once, then starts a recognition. Completion gets an error message or nil.
     func begin(completion: @escaping (String?) -> Void) {
         if authorized {
@@ -97,10 +105,17 @@ final class SpeechInput {
         guard fmt.sampleRate > 0, fmt.channelCount > 0 else {
             throw NSError(domain: "Agentsphere", code: 2, userInfo: [NSLocalizedDescriptionKey: "No usable microphone input (\(inputName))"])
         }
+        // Lives with this tap: a reopened input gets a new one for its new format.
+        let converter = AVAudioConverter(from: fmt, to: Self.pcmFormat)
         input.installTap(onBus: 0, bufferSize: 1024, format: fmt) { [weak self] buffer, _ in
             guard let self else { return }
-            let req = self.requestLock.withLock { self.currentRequest }
+            let (req, rec) = self.requestLock.withLock { (self.currentRequest, self.recording) }
             req?.append(buffer)
+            if rec, let converter, let pcm = Self.pcm16(buffer, converter) {
+                self.requestLock.withLock {
+                    if self.recording, self.recorded.count < Self.maxRecorded { self.recorded.append(pcm) }
+                }
+            }
         }
         e.prepare()
         try e.start()
@@ -132,7 +147,11 @@ final class SpeechInput {
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
         if recognizer.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
-        requestLock.withLock { currentRequest = req }
+        requestLock.withLock {
+            currentRequest = req
+            recorded = Data()
+            recording = recordsAudio
+        }
         task = recognizer.recognitionTask(with: req) { [weak self] result, _ in
             guard let result else { return }
             let text = result.bestTranscription.formattedString
@@ -150,6 +169,17 @@ final class SpeechInput {
         return text
     }
 
+    /// Like finish(), plus the utterance's audio as a WAV (nil unless recordsAudio).
+    func finishWithAudio() -> (text: String, wav: Data?) {
+        let text = finish()
+        let pcm = requestLock.withLock { () -> Data in
+            let d = recorded
+            recorded = Data()
+            return d
+        }
+        return (text, pcm.isEmpty ? nil : Self.wav(pcm, sampleRate: 16000))
+    }
+
     /// Closes the mic entirely (hands-free off, or after push-to-talk).
     func shutdown() {
         endRecognition()
@@ -160,11 +190,42 @@ final class SpeechInput {
         let req = requestLock.withLock { () -> SFSpeechAudioBufferRecognitionRequest? in
             let r = currentRequest
             currentRequest = nil
+            recording = false
             return r
         }
         req?.endAudio()
         task?.cancel()
         task = nil
+    }
+
+    /// One mic buffer, resampled to 16 kHz mono 16-bit. The converter keeps its state between
+    /// buffers, so consecutive buffers join up seamlessly.
+    private static func pcm16(_ buffer: AVAudioPCMBuffer, _ converter: AVAudioConverter) -> Data? {
+        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * pcmFormat.sampleRate / buffer.format.sampleRate) + 32
+        guard let out = AVAudioPCMBuffer(pcmFormat: pcmFormat, frameCapacity: capacity) else { return nil }
+        var fed = false
+        var error: NSError?
+        converter.convert(to: out, error: &error) { _, status in
+            if fed { status.pointee = .noDataNow; return nil }
+            fed = true
+            status.pointee = .haveData
+            return buffer
+        }
+        guard error == nil, out.frameLength > 0, let samples = out.int16ChannelData else { return nil }
+        return Data(bytes: samples[0], count: Int(out.frameLength) * 2)
+    }
+
+    /// 16-bit mono PCM wrapped in a WAV header.
+    static func wav(_ pcm: Data, sampleRate: Int) -> Data {
+        var d = Data()
+        func u32(_ v: Int) { withUnsafeBytes(of: UInt32(v).littleEndian) { d.append(contentsOf: $0) } }
+        func u16(_ v: Int) { withUnsafeBytes(of: UInt16(v).littleEndian) { d.append(contentsOf: $0) } }
+        d.append(contentsOf: Array("RIFF".utf8)); u32(36 + pcm.count)
+        d.append(contentsOf: Array("WAVEfmt ".utf8)); u32(16); u16(1); u16(1)
+        u32(sampleRate); u32(sampleRate * 2); u16(2); u16(16)
+        d.append(contentsOf: Array("data".utf8)); u32(pcm.count)
+        d.append(pcm)
+        return d
     }
 
     private func shutdownInput() {
