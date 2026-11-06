@@ -7,6 +7,7 @@ struct AgentDetailView: View {
     let agentId: UUID
     @State private var finding = false
     @State private var confirmDelete = false
+    @State private var menu: [CatalogItem] = []
 
     var body: some View {
         if let agent = state.agent(agentId) {
@@ -14,7 +15,7 @@ struct AgentDetailView: View {
                 VStack(spacing: 24) {
                     VStack(spacing: 10) {
                         BotView(agent: agent, mood: state.mood(for: agent), size: 96)
-                        Text(agent.name).font(.system(size: 28, weight: .bold)).multilineTextAlignment(.center)
+                        AgentTitle(agent: agent, font: .system(size: 28, weight: .bold), badgeSize: 22)
                         Text(subtitle(agent)).font(.subheadline).foregroundStyle(.secondary)
                     }
                     .padding(.top, 8)
@@ -46,6 +47,19 @@ struct AgentDetailView: View {
                             RowDivider(); row("Price", agent.pricing == "paid" ? "Paid" : "Free")
                         }
                         .card()
+                    }
+
+                    if !menu.isEmpty {
+                        VStack(spacing: 8) {
+                            SectionLabel("Menu")
+                            VStack(spacing: 0) {
+                                ForEach(Array(menu.enumerated()), id: \.element.key) { i, item in
+                                    if i > 0 { RowDivider() }
+                                    row(item.name, Money.usd(item.priceUsdc))
+                                }
+                            }
+                            .card()
+                        }
                     }
 
                     if !agent.greeting.isEmpty || !(agent.context ?? "").isEmpty {
@@ -88,6 +102,10 @@ struct AgentDetailView: View {
                 Text("It disappears for everyone. This can't be undone.")
             }
             .fullScreenCover(isPresented: $finding) { FindView(agentId: agent.id) }
+            .task(id: agent.pricing) {
+                guard agent.pricing == "paid" else { return }
+                menu = (try? await Backend.shared.catalog(agentId: agent.id)) ?? []
+            }
         }
     }
 

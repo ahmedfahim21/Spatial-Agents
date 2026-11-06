@@ -146,7 +146,7 @@ private struct NearbyRow: View {
         HStack(spacing: 14) {
             BotView(agent: agent, mood: here ? state.mood(for: agent) : .idle, size: 44, look: here ? state.look(for: agent) : 0)
             VStack(alignment: .leading, spacing: 2) {
-                Text(agent.name).font(.body.weight(.semibold)).foregroundStyle(.primary).lineLimit(1)
+                AgentTitle(agent: agent, font: .body.weight(.semibold), badgeSize: 13, tappable: false).foregroundStyle(.primary)
                 subtitle
             }
             Spacer(minLength: 8)
@@ -261,7 +261,7 @@ private struct SelectedCard: View {
             HStack(spacing: 14) {
                 BotView(agent: agent, mood: state.mood(for: agent), size: 48)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(agent.name).font(.headline)
+                    AgentTitle(agent: agent)
                     Text(detail).font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)

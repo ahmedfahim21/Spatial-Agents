@@ -28,6 +28,7 @@ struct SettingsView: View {
                     Toggle("Demo mode", isOn: Binding(get: { loc.simulated != nil }, set: { state.setDemoMode($0) }))
                         .tint(.green)
                 } header: { Text("Location") } footer: { Text("Simulates your location for stage demos.") }
+                WalletSection()
                 Section("Account") {
                     LabeledContent("Server", value: !Config.isConfigured ? "Not configured" : state.backendStatus.isEmpty ? "Connected" : "Offline")
                     Button("Show the introduction") { onboarded = false }

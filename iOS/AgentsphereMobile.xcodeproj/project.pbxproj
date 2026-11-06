@@ -22,6 +22,7 @@
 		48E1658AF8070914CEF75CE5 /* Bot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3152B5494B1B57B6F4E97B9E /* Bot.swift */; };
 		507E0C7AA0A06C51F55AD5A9 /* SpaceStage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 294E3BAC9F7EFFDF2A41E375 /* SpaceStage.swift */; };
 		50D3612662D546B98750741F /* Agent.swift in Sources */ = {isa = PBXBuildFile; fileRef = F85A612CB15D021880EC1BFE /* Agent.swift */; };
+		56A32DAAF9F4CAB9CA9DF247 /* Payments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 671C0812D64D154BA89F8B87 /* Payments.swift */; };
 		606FF9686D034A823B9403C1 /* SetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F2F318535326CF01C65DE81 /* SetupView.swift */; };
 		68905B9AA26384CC2E810ADC /* AudioCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F68D207AE23DC67D59CC51E /* AudioCore.swift */; };
 		711203F7DB33AFCDFF87D218 /* MobileState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFB8E080CD8FD26234ABA4D /* MobileState.swift */; };
@@ -59,6 +60,7 @@
 		5241CFF9F58D3214E5B9A117 /* GeoMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoMath.swift; sourceTree = "<group>"; };
 		5F68D207AE23DC67D59CC51E /* AudioCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCore.swift; sourceTree = "<group>"; };
 		66902293E714575F63D7517A /* MapViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapViews.swift; sourceTree = "<group>"; };
+		671C0812D64D154BA89F8B87 /* Payments.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Payments.swift; sourceTree = "<group>"; };
 		6B42CE28424418C4C9ADB2EF /* Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Config.swift; sourceTree = "<group>"; };
 		6CBF20167AD7033B1CC16F09 /* Agentsphere.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Agentsphere.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6D29CE04B8CBB324C3342373 /* ConversationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationView.swift; sourceTree = "<group>"; };
@@ -147,6 +149,7 @@
 				66902293E714575F63D7517A /* MapViews.swift */,
 				4CFB8E080CD8FD26234ABA4D /* MobileState.swift */,
 				094CD02559ADA21BAB95E7CC /* Onboarding.swift */,
+				671C0812D64D154BA89F8B87 /* Payments.swift */,
 				2BB318E4F929F2C2DC23056E /* PositionFilter.swift */,
 				3431B5C1813404767B7B3E06 /* SettingsView.swift */,
 				9F2F318535326CF01C65DE81 /* SetupView.swift */,
@@ -256,6 +259,7 @@
 				018B9E590446E4770902D173 /* MapViews.swift in Sources */,
 				711203F7DB33AFCDFF87D218 /* MobileState.swift in Sources */,
 				3EC1984566963C1A43D19EC4 /* Onboarding.swift in Sources */,
+				56A32DAAF9F4CAB9CA9DF247 /* Payments.swift in Sources */,
 				B39D2E980E57456BC3915EE8 /* PositionFilter.swift in Sources */,
 				3642104A9950ABDDBB1E49D1 /* SettingsView.swift in Sources */,
 				606FF9686D034A823B9403C1 /* SetupView.swift in Sources */,

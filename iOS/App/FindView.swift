@@ -58,7 +58,7 @@ private struct FindingStage: View {
             HStack {
                 HStack(spacing: 8) {
                     BotView(agent: agent, size: 28)
-                    Text(agent.name).font(.headline)
+                    AgentTitle(agent: agent)
                 }
                 Spacer()
                 Button(action: close) { Image(systemName: "xmark") }
@@ -217,9 +217,7 @@ private struct ArrivedStage: View {
             Spacer()
             ArrivedBot(agent: agent, focused: focused)
             VStack(spacing: 6) {
-                Text(agent.name)
-                    .font(.system(size: 28, weight: .bold))
-                    .multilineTextAlignment(.center)
+                AgentTitle(agent: agent, font: .system(size: 28, weight: .bold), badgeSize: 22)
                 Group {
                     if !state.hasHeadData {
                         Text("Tap Talk to start")

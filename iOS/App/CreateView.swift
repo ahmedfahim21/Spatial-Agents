@@ -22,7 +22,7 @@ enum AgentFlavor: String, CaseIterable, Identifiable {
 
 /// Make an agent: who it is, what it knows, and where it lives.
 struct CreateView: View {
-    enum Field: Hashable { case name, greeting, context, wallet }
+    enum Field: Hashable { case name, greeting, context }
 
     @Environment(MobileState.self) private var state
     @State private var name = ""
@@ -32,7 +32,8 @@ struct CreateView: View {
     @State private var greeting = ""
     @State private var context = ""
     @State private var radius = 25.0
-    @State private var wallet = ""
+    @State private var acceptsPayments = false
+    @State private var catalog = [CatalogDraft()]
     /// Where a placed agent goes; nil = wherever you are when you tap Create.
     @State private var place: CLLocationCoordinate2D?
     @State private var picking = false
@@ -109,15 +110,7 @@ struct CreateView: View {
                 }
 
                 if flavor == .publicPlace {
-                    Section {
-                        TextField("Wallet address (optional)", text: $wallet)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .focused($field, equals: .wallet)
-                            .submitLabel(.done)
-                            .onSubmit { field = nil }
-                        LabeledContent("Price", value: "Free")
-                    } header: { Text("Payments") } footer: { Text("Paid agents (x402) are coming soon.") }
+                    PaymentsSection(enabled: $acceptsPayments, items: $catalog)
                 }
 
                 Section {
@@ -191,7 +184,12 @@ struct CreateView: View {
     private var canSave: Bool {
         !name.trimmingCharacters(in: .whitespaces).isEmpty && !saving
             && (!state.createFlavor.needsPlace || place != nil || state.location.hasFix)
+            && (!selling || (state.worldIdentity != nil && !menu.isEmpty && catalog.allSatisfy { $0.isValid || $0.isBlank }))
     }
+
+    private var selling: Bool { state.createFlavor == .publicPlace && acceptsPayments }
+    /// The rows filled in (blank rows are ignored).
+    private var menu: [CatalogItem] { catalog.compactMap(\.item) }
 
     private func save() {
         let flavor = state.createFlavor
@@ -209,20 +207,29 @@ struct CreateView: View {
             context: context.trimmingCharacters(in: .whitespacesAndNewlines),
             lat: flavor.needsPlace ? c?.latitude : nil,
             lng: flavor.needsPlace ? c?.longitude : nil,
-            radiusM: radius,
-            walletAddress: wallet.isEmpty ? nil : wallet.trimmingCharacters(in: .whitespaces)
+            radiusM: radius
         )
+        let items = selling ? menu : []
         field = nil
         saving = true
         withAnimation(Motion.snappy) { result = nil }
         Task {
             do {
                 let a = try await state.create(new)
-                state.haptics.arrived()
-                withAnimation(Motion.snappy) {
-                    result = .success(flavor == .withMe ? "\(a.name) is with you now." : "\(a.name) is on the map.")
+                var done = flavor == .withMe ? "\(a.name) is with you now." : "\(a.name) is on the map."
+                if !items.isEmpty {
+                    do {
+                        try await state.openShop(a, items: items)
+                        done = "\(a.name) is on the map and taking payments."
+                    } catch {
+                        // The agent exists; only selling failed. Say so rather than hide it.
+                        throw BackendError(message: "\(a.name) is on the map, but payments couldn't be turned on: \(error.localizedDescription)")
+                    }
                 }
-                name = ""; greeting = ""; context = ""; wallet = ""; place = nil
+                state.haptics.arrived()
+                withAnimation(Motion.snappy) { result = .success(done) }
+                name = ""; greeting = ""; context = ""; place = nil
+                acceptsPayments = false; catalog = [CatalogDraft()]
             } catch {
                 withAnimation(Motion.snappy) { result = .failure(error) }
             }
