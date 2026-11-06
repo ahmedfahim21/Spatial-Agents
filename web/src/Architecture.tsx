@@ -1,22 +1,22 @@
 import { ArrowRight } from "lucide-react";
 import { useEffect, useState } from "react";
 
-type Node = { x: number; y: number; label: string; note: string; where: string };
+type Node = { x: number; y: number; label: string; note: string };
 
 const nodes = {
-  airpods: { x: 90, y: 270, label: "AirPods", note: "Head pose from the motion sensors, and spatial audio back. Each agent is a sound source moved opposite your head, so it stays put.", where: "Shared/HeadTracker.swift, Shared/SpatialAudio.swift" },
-  mac: { x: 300, y: 120, label: "Mac app", note: "Holds your Claude Code sessions around you and runs a local server that keeps each tool call open until you answer.", where: "Sources/Agentsphere" },
-  iphone: { x: 300, y: 400, label: "iPhone app", note: "Personal and placed agents, the map, phone tools and your orders. Calendar, Health and the rest run here.", where: "iOS/App" },
-  claude: { x: 540, y: 60, label: "Claude Code", note: "Each turn runs claude -p with --resume in the agent's folder, so the conversation continues.", where: "ClaudeRunner.swift" },
-  chat: { x: 540, y: 180, label: "chat", note: "One conversational turn. Streams the reply, passes tool requests to the phone, and turns a hidden order line into a payment.", where: "supabase/functions/chat" },
-  stt: { x: 540, y: 270, label: "stt", note: "Speech to text for what you say to an agent.", where: "supabase/functions/stt" },
-  tts: { x: 540, y: 360, label: "tts", note: "Speaks a line in the agent's voice, so the app ships no key.", where: "supabase/functions/tts" },
-  pay: { x: 540, y: 470, label: "pay", note: "Your custodial wallet agent. Pays within your limits, or creates an approval that a fresh World ID check must clear.", where: "supabase/functions/pay" },
-  zerog: { x: 780, y: 225, label: "0G Router", note: "Chat models, chosen per agent, and Whisper Large v3 for speech.", where: "router-api.0g.ai" },
-  eleven: { x: 780, y: 360, label: "ElevenLabs", note: "Streaming voices for each agent.", where: "supabase/functions/tts" },
-  shop: { x: 780, y: 470, label: "shop", note: "The x402 seller. Answers 402 with the price, then verifies and settles the signed payment.", where: "supabase/functions/shop" },
-  world: { x: 780, y: 560, label: "World ID", note: "The human checkpoint for purchases above your limit.", where: "supabase/functions/world" },
-  hedera: { x: 1010, y: 470, label: "Hedera", note: "USDC settles here, and every payment is written to an HCS topic as an audit log.", where: "supabase/functions/_shared/hedera.ts" },
+  airpods: { x: 90, y: 270, label: "AirPods", note: "Head pose from the motion sensors, and spatial audio back. Each agent is a sound source moved opposite your head, so it stays put." },
+  mac: { x: 300, y: 120, label: "Mac app", note: "Holds your Claude Code sessions around you and runs a local server that keeps each tool call open until you answer." },
+  iphone: { x: 300, y: 400, label: "iPhone app", note: "Personal and placed agents, the map, phone tools and your orders. Calendar, Health and the rest run here." },
+  claude: { x: 540, y: 60, label: "Claude Code", note: "Each turn runs claude -p with --resume in the agent's folder, so the conversation continues." },
+  chat: { x: 540, y: 180, label: "chat", note: "One conversational turn. Streams the reply, passes tool requests to the phone, and turns a hidden order line into a payment." },
+  stt: { x: 540, y: 270, label: "stt", note: "Speech to text for what you say to an agent." },
+  tts: { x: 540, y: 360, label: "tts", note: "Speaks a line in the agent's voice, so the app ships no key." },
+  pay: { x: 540, y: 470, label: "pay", note: "Your custodial wallet agent. Pays within your limits, or creates an approval that a fresh World ID check must clear." },
+  zerog: { x: 780, y: 225, label: "0G Router", note: "Chat models, chosen per agent, and Whisper Large v3 for speech." },
+  eleven: { x: 780, y: 360, label: "ElevenLabs", note: "Streaming voices for each agent." },
+  shop: { x: 780, y: 470, label: "shop", note: "The x402 seller. Answers 402 with the price, then verifies and settles the signed payment." },
+  world: { x: 780, y: 560, label: "World ID", note: "The human checkpoint for purchases above your limit." },
+  hedera: { x: 1010, y: 470, label: "Hedera", note: "USDC settles here, and every payment is written to an HCS topic as an audit log." },
 } satisfies Record<string, Node>;
 
 type Id = keyof typeof nodes;
@@ -193,7 +193,6 @@ export function Architecture() {
         <div className="rounded-2xl bg-white p-4">
           <p className="text-[17px]">{info.label}</p>
           <p className="mt-1 text-[14px] leading-5 text-secondary">{info.note}</p>
-          <p className="mt-2 break-words font-mono text-[12px] text-secondary">{info.where}</p>
         </div>
       </div>
       </div>
