@@ -42,6 +42,8 @@ final class SpeechInput {
     var isInputOpen: Bool { engine != nil }
     private(set) var inputName = "Default input"
 
+    /// Words likely to be said (e.g. agent names), so recognition favours them.
+    var hints: [String] = []
     /// Called on the main queue with the running transcript.
     var onPartial: ((String) -> Void)?
 
@@ -146,6 +148,7 @@ final class SpeechInput {
         try ensureInput()
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
+        req.contextualStrings = hints
         if recognizer.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
         requestLock.withLock {
             currentRequest = req

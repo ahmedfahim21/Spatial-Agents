@@ -171,6 +171,12 @@ struct RowDivider: View {
 // MARK: - Words
 
 enum Words {
+    /// "two", "three" … for small counts.
+    static func count(_ n: Int) -> String {
+        let names = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]
+        return n < names.count ? names[n] : "\(n)"
+    }
+
     /// "42 m", "1.2 km".
     static func distance(_ m: Double) -> String { GeoMath.describe(distance: m) }
 

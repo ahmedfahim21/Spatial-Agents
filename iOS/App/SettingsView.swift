@@ -5,23 +5,36 @@ struct SettingsView: View {
     @AppStorage("onboarded") private var onboarded = true
     @State private var arranging = false
     @State private var confirmClearAll = false
+    @State private var copiedAccount = false
+    @State private var teaching = false
 
     var body: some View {
         @Bindable var state = state
         let loc = state.location
         NavigationStack {
             Form {
-                Section("Head tracking") {
+                Section("Head and gestures") {
                     LabeledContent(state.hasHeadData ? state.routeName : "AirPods", value: state.hasHeadData ? "Tracking" : "Not connected")
                     Toggle("Agents with me", isOn: $state.withMe).tint(.green)
-                    Picker("Glance to pick", selection: $state.glanceSize) {
-                        Text("Small").tag(10.0)
-                        Text("Medium").tag(14.0)
-                        Text("Large").tag(20.0)
-                    }
-                    Button("Recenter") { state.calibrateForward() }
-                        .disabled(!state.hasHeadData)
                     Button("Arrange your space") { arranging = true }
+                    Button {
+                        teaching = true
+                    } label: {
+                        LabeledContent("Teach your gestures", value: state.gesturesLearned ? "Learnt" : "Not yet")
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        LabeledContent("Sensitivity", value: state.gestureSensitivity < 0.85 ? "Firm" : state.gestureSensitivity > 1.2 ? "Light" : "Normal")
+                        Slider(value: $state.gestureSensitivity, in: 0.5...2, step: 0.1) {
+                            Text("Sensitivity")
+                        } minimumValueLabel: {
+                            Image(systemName: "tortoise")
+                        } maximumValueLabel: {
+                            Image(systemName: "hare")
+                        }
+                    }
+                    if state.gesturesLearned {
+                        Button("Forget my gestures", role: .destructive) { state.resetGestures() }
+                    }
                     NavigationLink {
                         LineupsView()
                     } label: {
@@ -33,7 +46,7 @@ struct SettingsView: View {
                         ForEach(MobileState.Announce.allCases) { Text($0.title).tag($0) }
                     }
                 } header: { Text("Walking around") } footer: {
-                    Text("With headphones in, agents near you introduce themselves from where they are, one at a time. Works with your phone in your pocket.")
+                    Text("With headphones in, walking into a place's area, Air Agents tells you who's there and asks if you want to talk. Double nod for yes, double shake for no. Works with your phone in your pocket.")
                 }
                 Section("Audio") {
                     LabeledContent("Output", value: state.routeName)
@@ -69,6 +82,16 @@ struct SettingsView: View {
                 WalletSection()
                 Section("Account") {
                     LabeledContent("Server", value: !Config.isConfigured ? "Not configured" : state.backendStatus.isEmpty ? "Connected" : "Offline")
+                    if let id = state.accountId {
+                        Button {
+                            UIPasteboard.general.string = id
+                            copiedAccount = true
+                        } label: {
+                            LabeledContent("Account ID", value: copiedAccount ? "Copied" : String(id.prefix(8)) + "…")
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Copies your account ID")
+                    }
                     Button("Show the introduction") { onboarded = false }
                 }
             }
@@ -77,6 +100,7 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .onAppear { state.refreshRoute() }
             .sheet(isPresented: $arranging) { SetupView() }
+            .sheet(isPresented: $teaching) { GestureLessonView() }
         }
     }
 }

@@ -1,15 +1,14 @@
 import Foundation
 
-/// Two windows around you for your personal agents: one on your left, one on your right,
-/// at eye level. Front stays clear for whatever you're actually looking at, and each agent
-/// is one clear head turn away.
+/// Two windows for your personal agents: one on your left, one on your right, fixed to your
+/// head. A quick turn toward a side, from wherever you're facing, picks its agent.
 enum Zone: String, CaseIterable, Codable, Identifiable {
     case left, right
 
     var id: String { rawValue }
 
-    /// Where its voice comes from, degrees from your rest direction (+ = right). Just past
-    /// the edge of what you're looking at; a small glance that way picks it.
+    /// Where its voice comes from, degrees (+ = right), fixed to your head: the left agent is
+    /// always in your left ear.
     var azimuth: Double { self == .left ? -45 : 45 }
 
     /// Degrees above eye level.

@@ -30,13 +30,6 @@ struct WithMeView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("With me")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { state.calibrateForward() } label: { Image(systemName: "scope") }
-                        .accessibilityLabel("Set forward to where you're looking")
-                        .disabled(!state.hasHeadData)
-                }
-            }
             .navigationDestination(for: UUID.self) { AgentDetailView(agentId: $0) }
             .sheet(isPresented: $arranging) { SetupView() }
             #if DEBUG
@@ -54,7 +47,7 @@ struct WithMeView: View {
                     .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Set up your space").font(.headline)
-                    Text("Choose forward, and who sits in your left and right windows.")
+                    Text("Choose who sits on your left and who sits on your right.")
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
@@ -132,16 +125,16 @@ private struct Caption: View {
         let active = state.agent(state.activeId)
         let title: String = {
             if let active { return "Talking to \(active.name)" }
-            if let focused { return "Nod to talk to \(focused.name)" }
-            if state.hasHeadData { return "Glance left or right, then nod" }
-            return "Put in your AirPods to look around"
+            if let focused { return "Double nod or tap to talk to \(focused.name)" }
+            if state.hasHeadData { return "Turn left or right to pick an agent" }
+            return "Tap an agent to talk"
         }()
         return VStack(spacing: 4) {
             Text(title)
                 .font(.headline)
                 .contentTransition(.opacity)
-            Text(state.hasHeadData ? "A small turn of the head picks a side, whichever way you're facing."
-                                   : "They sit just left and right of you. Glance at one and nod to talk.")
+            Text(state.hasHeadData ? "A quick turn of your head, from wherever you're facing, picks that side. Double nod or tap to talk; double shake or say bye to end."
+                                   : "Put in your AirPods to pick one with a turn of your head and a double nod.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
@@ -151,7 +144,7 @@ private struct Caption: View {
     }
 }
 
-/// Top-down view of you and your agents: front is up, your gaze is the cone.
+/// Top-down view of you and your agents, left and right. The cone points at the one you picked.
 private struct Radar: View {
     @Environment(MobileState.self) private var state
     private let radius: CGFloat = 112
@@ -160,13 +153,13 @@ private struct Radar: View {
         ZStack {
             Circle().stroke(Color(.systemGray4), lineWidth: 0.75)
                 .frame(width: radius * 2, height: radius * 2)
-            if state.hasHeadData {
+            if let side = state.pickedSide, state.agent(in: side) != nil {
                 GazeCone()
                     .fill(RadialGradient(colors: [Color.primary.opacity(0.16), Color.primary.opacity(0)],
                                          center: .bottom, startRadius: 0, endRadius: radius * 1.1))
                     .frame(width: radius * 1.1, height: radius * 1.15)
                     .offset(y: -radius * 0.575)
-                    .rotationEffect(.degrees(state.headYaw))
+                    .rotationEffect(.degrees(side.azimuth))
                     .transition(.opacity)
             }
             Circle()
@@ -183,22 +176,32 @@ private struct Radar: View {
         .frame(width: radius * 2 + 64, height: radius * 2 + 64)
         .animation(Motion.smooth, value: state.zones)
         .animation(Motion.snappy, value: state.hasHeadData)
+        .animation(Motion.snappy, value: state.pickedSide)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Your agents around you")
     }
 
-    /// Each window's agent sits on the ring at its side.
+    /// Each window's agent sits on the ring at its side. The picked one grows; tap one to talk.
     private func placed(_ agent: Agent, _ zone: Zone) -> some View {
         let r = radius
         let a = zone.azimuth * .pi / 180
         let size: CGFloat = 52
         let focused = state.focusedId == agent.id
-        return ZStack {
-            FocusRing(active: focused, diameter: size + 14, lineWidth: 3, showsTrack: false)
-            BotView(agent: agent, mood: state.mood(for: agent), size: size, look: -sin(a))
+        let dimmed = state.focusedId != nil && !focused
+        return Button {
+            if state.activeId != agent.id { state.wake(agent) }
+        } label: {
+            ZStack {
+                FocusRing(active: focused, diameter: size + 14, lineWidth: 3, showsTrack: false)
+                BotView(agent: agent, mood: state.mood(for: agent), size: size, look: -sin(a))
+            }
         }
+        .buttonStyle(PressableStyle())
+        .scaleEffect(focused ? 1.5 : dimmed ? 0.85 : 1)
+        .opacity(dimmed ? 0.55 : 1)
         .offset(x: sin(a) * r, y: -cos(a) * r)
-        .animation(Motion.snappy, value: focused)
+        .animation(.spring(response: 0.3, dampingFraction: 0.62), value: focused)
+        .animation(Motion.snappy, value: dimmed)
     }
 }
 
@@ -227,7 +230,7 @@ private struct EmptyWithMe: View {
             .padding(.top, 48)
             VStack(spacing: 6) {
                 Text("No agents with you yet").font(.title3.bold())
-                Text("Personal agents travel with you, arranged around your head. Turn to one and it's there.")
+                Text("Personal agents travel with you, one on your left and one on your right. Turn toward one and it's there.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)

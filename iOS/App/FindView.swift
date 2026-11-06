@@ -149,19 +149,6 @@ private struct ArrivedBot: View {
     }
 }
 
-private struct VoiceDirection: View {
-    @Environment(MobileState.self) private var state
-    let agent: Agent
-
-    var body: some View {
-        if let relative = state.relativeAngle(agent.id) {
-            Text("Its voice is \(Words.voiceDirection(relative)) · \(state.routeName)")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-    }
-}
-
 /// The precision-finding dial: a ring of dots that brightens toward the agent, and the arrow.
 private struct Dial: View {
     /// Degrees clockwise from straight up; nil hides the arrow.
@@ -257,15 +244,13 @@ private struct ArrivedStage: View {
                 Group {
                     if !state.hasHeadData {
                         Text("Tap Talk to start")
-                    } else if focused {
-                        Text("Nod to talk")
                     } else {
-                        Text("Look toward \(agent.name)")
+                        Text("Double nod to talk")
                     }
                 }
                 .font(.headline)
                 .contentTransition(.opacity)
-                Text(state.hasHeadData ? "Shake your head to end the conversation" : "Put in your AirPods to talk hands-free")
+                Text(state.hasHeadData ? "Double shake to end the conversation" : "Put in your AirPods to talk hands-free")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -274,9 +259,8 @@ private struct ArrivedStage: View {
             Spacer()
 
             VStack(spacing: 14) {
-                if state.hasHeadData { VoiceDirection(agent: agent) }
                 if state.hasHeadData {
-                    Button { state.wake(agent) } label: { Label("Talk instead", systemImage: "mic.fill") }
+                    Button { state.wake(agent) } label: { Label("Talk", systemImage: "mic.fill") }
                         .buttonStyle(SecondaryButtonStyle())
                 } else {
                     Button { state.wake(agent) } label: { Label("Talk", systemImage: "mic.fill") }

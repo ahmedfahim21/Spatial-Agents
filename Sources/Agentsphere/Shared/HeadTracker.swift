@@ -6,6 +6,25 @@ enum HeadGesture: String {
     case shake = "Shake"
 }
 
+/// How one person nods and shakes: learnt from them (the phone's gesture lesson), or the
+/// defaults. Speeds in degrees per second, sizes in degrees, before sensitivity.
+struct GestureProfile: Codable, Equatable {
+    var nodSpeed: Double = 35
+    var nodSize: Double = 10
+    /// Up/down swings that make a yes: 2 is one nod (down, up), 3 or more a double nod.
+    var nodSwings = 2
+    /// Up/down movement must beat sideways wobble by this much.
+    var nodRatio: Double = 1.3
+    var shakeSpeed: Double = 80
+    var shakeSize: Double = 18
+    var shakeSwings = 2
+    /// Seconds a gesture's swings must fall within.
+    var window: Double = 1.0
+    /// A quick turn left or right: this many degrees within `turnTime` seconds (phone only).
+    var turnSize: Double = 15
+    var turnTime: Double = 0.8
+}
+
 /// Reads AirPods head orientation (AirPods Pro, Max, 3rd/4th gen; macOS 14+).
 final class HeadTracker {
     private let manager = CMHeadphoneMotionManager()
@@ -21,9 +40,31 @@ final class HeadTracker {
     var onYaw: ((Double) -> Void)?
     /// Called on the main queue with smoothed pitch in degrees: positive = looking up.
     var onPitch: ((Double) -> Void)?
+    /// Shakes need three clear swings instead of two (e.g. mid-conversation).
+    var strictShake: Bool {
+        get { gestures.strictShake }
+        set { gestures.strictShake = newValue }
+    }
+    /// Off when a shake would do nothing: then a big turn can't pass for one, and its
+    /// cooldown can't swallow the nod that follows.
+    var detectShakes: Bool {
+        get { gestures.detectShakes }
+        set { gestures.detectShakes = newValue }
+    }
     /// Smoothed yaw in the tracker's fixed frame (no body-follow), for world-anchored things.
     var onFixedYaw: ((Double) -> Void)?
     var onGesture: ((HeadGesture) -> Void)?
+    /// Every reading as gestures see it (time, yaw, pitch in degrees), for learning gestures.
+    var onSample: ((Double, Double, Double) -> Void)?
+    var profile: GestureProfile {
+        get { gestures.profile }
+        set { gestures.profile = newValue }
+    }
+    /// Diagnostics from gesture detection (each up/down movement, near-miss nods).
+    var onDebug: ((String) -> Void)? {
+        get { gestures.debugLog }
+        set { gestures.debugLog = newValue }
+    }
     var onStatus: ((String) -> Void)?
     /// "walking", "re-centering" or "" — for the UI.
     var onFollowState: ((String) -> Void)?
@@ -89,6 +130,7 @@ final class HeadTracker {
             yaw = normalizeAngle(yaw)
 
             // Gestures want the raw signal: smoothing would blunt a quick nod.
+            self.onSample?(m.timestamp, yaw, pitch)
             if let g = self.gestures.feed(time: m.timestamp, yaw: yaw, pitch: pitch) {
                 self.onGesture?(g)
             }
@@ -139,6 +181,7 @@ final class BodyFollower {
     private var offSince: Double?
     private var recentering = false
     private let walk = WalkDetector()
+    var walking: Bool { walk.walking }
 
     func reset() {
         bodyYaw = nil
@@ -264,6 +307,13 @@ final class OneEuroFilter {
 /// deliberate. A plain turn toward an agent only swings one way, so it never counts.
 final class GestureDetector {
     var sensitivity: Double = 1
+    var profile = GestureProfile()
+    var strictShake = false
+    var detectShakes = true
+    var debugLog: ((String) -> Void)?
+    /// Diagnostics: the up/down movement under way, and the best nod that didn't count.
+    private var move: (start: Double, from: Double, peak: Double)?
+    private var nodMiss: (pitch: Double, yaw: Double)?
     private(set) var yawSpeed: Double = 0
     private var pitchSpeed: Double = 0
 
@@ -276,12 +326,9 @@ final class GestureDetector {
     private var pitchSwings: [Swing] = []
     private var quietUntil: Double = 0
 
-    // Before sensitivity: degrees per second, and degrees of travel.
-    private let nodSpeed: Double = 60
-    private let shakeSpeed: Double = 80
-    private let nodSize: Double = 10
-    private let shakeSize: Double = 18
-    private let window: Double = 1.0
+    // Before sensitivity: degrees per second, and degrees of travel. Gentle nods peak around
+    // 40-60°/s (firm ones 80-120°/s); the travel check keeps talking and glancing out.
+    private var window: Double { profile.window }
     private let cooldown: Double = 1.2
 
     func feed(time: Double, yaw: Double, pitch: Double) -> HeadGesture? {
@@ -299,28 +346,70 @@ final class GestureDetector {
         history.append(sample)
         history.removeAll { time - $0.time > window }
 
+        // One line per up/down movement, start to stop, so a nod that didn't count shows why.
+        if abs(pitchSpeed) > 30 {
+            var m = move ?? (time, last.pitch, 0)
+            m.peak = max(m.peak, abs(pitchSpeed))
+            move = m
+        } else if let m = move {
+            let travel = pitch - m.from
+            if abs(travel) > 4 {
+                debugLog?(String(format: "pitch %@%.0f° in %.2fs, peak %.0f°/s", travel > 0 ? "+" : "", travel, time - m.start, m.peak))
+            }
+            move = nil
+        }
+
         guard time >= quietUntil else { return nil }
 
         let s = max(sensitivity, 0.1)
-        record(&pitchSwings, speed: pitchSpeed, threshold: nodSpeed / s, time: time)
-        record(&yawSwings, speed: yawSpeed, threshold: shakeSpeed / s, time: time)
-
-        // How far the head actually travelled inside the window.
-        let yaws = unwrap(history.map(\.yaw))
-        let yawTravel = (yaws.max() ?? 0) - (yaws.min() ?? 0)
-        let pitches = history.map(\.pitch)
-        let pitchTravel = (pitches.max() ?? 0) - (pitches.min() ?? 0)
+        let p = profile
+        record(&pitchSwings, speed: pitchSpeed, threshold: p.nodSpeed / s, time: time)
+        record(&yawSwings, speed: yawSpeed, threshold: p.shakeSpeed / s, time: time)
 
         // Shake: alternating yaw swings with real travel. Check before nod,
         // since heads bob a little while shaking.
-        if yawSwings.count >= 3 || (yawSwings.count == 2 && yawTravel > shakeSize * 1.5 / s) {
-            if yawTravel > shakeSize / s, yawTravel > pitchTravel * 1.3 { return fire(.shake, at: time) }
+        let shakeSwings = strictShake ? max(3, p.shakeSwings) : max(2, p.shakeSwings)
+        if detectShakes, let first = yawSwings.first, yawSwings.count >= shakeSwings {
+            let t = travel(since: first.time - 0.25)
+            let needed = (yawSwings.count >= 3 ? p.shakeSize : p.shakeSize * 1.5) / s
+            if t.yaw > needed, t.yawWobble > t.pitchWobble * 1.3 { return fire(.shake, at: time) }
         }
         // Nod: down then up (or up then down), mostly vertical.
-        if pitchSwings.count >= 2, pitchTravel > nodSize / s, pitchTravel > yawTravel * 1.3 {
-            return fire(.nod, at: time)
+        if let first = pitchSwings.first, pitchSwings.count >= max(2, p.nodSwings) {
+            let t = travel(since: first.time - 0.25)
+            // Wobble, not raw travel, sideways: nodding while still finishing a turn is fine.
+            if t.pitch > p.nodSize / s, t.pitchWobble > t.yawWobble * p.nodRatio {
+                nodMiss = nil
+                return fire(.nod, at: time)
+            }
+            if t.pitch > (nodMiss?.pitch ?? 0) { nodMiss = (t.pitch, t.yawWobble) }
+        } else if let miss = nodMiss {
+            debugLog?(String(format: "nod not counted: %.0f° up/down, %.0f° sideways", miss.pitch, miss.yaw))
+            nodMiss = nil
         }
         return nil
+    }
+
+    /// How far the head travelled during this gesture's own swings. Only those: turning toward
+    /// an agent and nodding straight away is the natural way to wake it, and counting the turn
+    /// made the nod look sideways and fail.
+    private func travel(since start: Double) -> (yaw: Double, pitch: Double, yawWobble: Double, pitchWobble: Double) {
+        let part = history.filter { $0.time >= start }
+        let times = part.map(\.time), yaws = unwrap(part.map(\.yaw)), pitches = part.map(\.pitch)
+        return ((yaws.max() ?? 0) - (yaws.min() ?? 0), (pitches.max() ?? 0) - (pitches.min() ?? 0),
+                Self.wobble(times, yaws), Self.wobble(times, pitches))
+    }
+
+    /// Range left after taking out a straight-line drift: a steady turn has none, a nod or
+    /// shake keeps all of its back and forth.
+    static func wobble(_ t: [Double], _ v: [Double]) -> Double {
+        guard v.count > 2, let t0 = t.first else { return (v.max() ?? 0) - (v.min() ?? 0) }
+        let x = t.map { $0 - t0 }, n = Double(v.count)
+        let mx = x.reduce(0, +) / n, mv = v.reduce(0, +) / n
+        let sxx = x.reduce(0) { $0 + ($1 - mx) * ($1 - mx) }
+        let slope = sxx > 0 ? zip(x, v).reduce(0) { $0 + ($1.0 - mx) * ($1.1 - mv) } / sxx : 0
+        let r = zip(x, v).map { $1 - (mv + slope * ($0 - mx)) }
+        return (r.max() ?? 0) - (r.min() ?? 0)
     }
 
     private func record(_ swings: inout [Swing], speed: Double, threshold: Double, time: Double) {

@@ -1,19 +1,19 @@
 import SwiftUI
 
-/// Three steps: set forward, choose who sits in your left and right windows, then try looking at them.
+/// Two steps: choose who sits in your left and right windows, then try turning toward them.
 struct SetupView: View {
-    enum Step: Int, CaseIterable { case forward, arrange, tryIt }
+    enum Step: Int, CaseIterable { case arrange, tryIt }
 
     @Environment(MobileState.self) private var state
     @Environment(\.dismiss) private var dismiss
     @State private var step: Step = {
         #if DEBUG
         // `-setupStep arrange` opens straight to a step, for checking screens without AirPods.
-        if let s = UserDefaults.standard.string(forKey: "setupStep"), let i = ["forward", "arrange", "try"].firstIndex(of: s) {
-            return Step(rawValue: i) ?? .forward
+        if let s = UserDefaults.standard.string(forKey: "setupStep"), let i = ["arrange", "try"].firstIndex(of: s) {
+            return Step(rawValue: i) ?? .arrange
         }
         #endif
-        return .forward
+        return .arrange
     }()
 
     var body: some View {
@@ -22,7 +22,6 @@ struct SetupView: View {
                 progress.padding(.top, 4)
                 Group {
                     switch step {
-                    case .forward: forward
                     case .arrange: arrange
                     case .tryIt: tryIt
                     }
@@ -55,42 +54,6 @@ struct SetupView: View {
         }
     }
 
-    // MARK: 1. Forward
-
-    private var forward: some View {
-        VStack(spacing: 18) {
-            Spacer()
-            ZStack {
-                Circle().fill(Color(.secondarySystemGroupedBackground)).frame(width: 200, height: 200)
-                VStack(spacing: 10) {
-                    Image(systemName: "arrow.up").font(.system(size: 34, weight: .bold))
-                    BotView(color: .cyan, shape: .circle, mood: state.hasHeadData ? .arrived : .idle, size: 80)
-                }
-            }
-            Text("Look straight ahead").font(.title2.bold())
-            Text("Sit or stand the way you usually work. This becomes the front of your space; your agents stay arranged around it and come with you when you move.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            Label("Keep Spatial Audio **Off** for Air Agents in Control Center. The app places sounds itself.", systemImage: "info.circle")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .padding(14)
-                .card()
-            Spacer()
-            if !state.hasHeadData {
-                Text("Waiting for AirPods head tracking…").font(.footnote).foregroundStyle(.orange)
-            }
-            Button("This is forward") {
-                state.calibrateForward()
-                state.haptics.tap(intensity: 0.8, sharpness: 0.5)
-                step = .arrange
-            }
-            .buttonStyle(PrimaryButtonStyle())
-            .disabled(!state.hasHeadData)
-        }
-    }
-
     // MARK: 2. Arrange
 
     private var arrange: some View {
@@ -109,6 +72,11 @@ struct SetupView: View {
                 Text("Not in a window: \(state.unzonedAgents.map(\.name).formatted(.list(type: .and))). \(state.unzonedAgents.count == 1 ? "It waits" : "They wait") in Agents until you swap \(state.unzonedAgents.count == 1 ? "it" : "them") in.")
                     .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
+            Label("Keep Spatial Audio **Off** for Air Agents in Control Center. The app places sounds itself.", systemImage: "info.circle")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(14)
+                .card()
             Spacer()
             Button("Next") { step = .tryIt }.buttonStyle(PrimaryButtonStyle())
         }
@@ -119,13 +87,13 @@ struct SetupView: View {
     private var tryIt: some View {
         VStack(spacing: 14) {
             VStack(spacing: 4) {
-                Text("Try looking around").font(.title2.bold())
-                Text("Each agent notices when your gaze lands on it. Later, look at one and nod to talk.")
+                Text("Try turning").font(.title2.bold())
+                Text("A quick turn left or right, from wherever you're facing, picks that side's agent. Later, double nod to talk.")
                     .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             .padding(.top, 18)
             SpaceStage().frame(height: 260)
-            Text(state.agent(state.focusedId).map { "Looking at \($0.name)" } ?? " ")
+            Text(state.agent(state.focusedId).map { "Picked \($0.name)" } ?? " ")
                 .font(.headline)
                 .contentTransition(.opacity)
                 .animation(Motion.snappy, value: state.focusedId)

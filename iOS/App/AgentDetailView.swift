@@ -216,7 +216,7 @@ struct AgentDetailView: View {
 
     private func shareText(_ a: Agent) -> String {
         a.isGeo && a.isPublic
-            ? "Come find \(a.name) on Air Agents. Look at it and nod, and it'll talk to you."
+            ? "Come find \(a.name) on Air Agents. Walk in, double nod, and it'll talk to you."
             : "I've got \(a.name) on Air Agents: an agent that sits around my head and talks when I look at it."
     }
 

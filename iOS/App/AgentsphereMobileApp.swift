@@ -25,6 +25,7 @@ struct RootView: View {
             Tab("Settings", systemImage: "gearshape", value: .settings) { SettingsView() }
         }
         .tint(.primary)
+        .overlay(alignment: .top) { InviteBanner() }
         // Conversations started anywhere but Find (which shows its own) slide up here.
         .sheet(isPresented: talking) {
             if let id = state.activeId {
@@ -65,5 +66,56 @@ struct RootView: View {
     private var talking: Binding<Bool> {
         Binding(get: { state.activeId != nil && state.findTargetId == nil && onboarded },
                 set: { if !$0 { state.endConversation() } })
+    }
+}
+
+/// "Two places around you. Want to talk to one?" on screen too: the names can be tapped.
+private struct InviteBanner: View {
+    @Environment(MobileState.self) private var state
+
+    var body: some View {
+        Group {
+            if let invite = state.invite {
+                let agents = invite.ids.compactMap(state.agent)
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(invite.step == .choosing ? "Which one?"
+                                 : agents.count == 1 ? "You're at \(agents.first?.name ?? "")"
+                                 : "\(Words.count(agents.count).capitalized) places around you")
+                                .font(.headline)
+                            Text(invite.step == .choosing ? "Say its name, or tap it" : "Double nod for yes · double shake for no")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 8)
+                        Button { state.endInvite(declined: true) } label: { Image(systemName: "xmark") }
+                            .buttonStyle(CircleButtonStyle())
+                            .accessibilityLabel("No thanks")
+                    }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(agents) { a in
+                                Button { state.acceptInvite(a.id) } label: {
+                                    HStack(spacing: 8) {
+                                        BotView(agent: a, size: 26)
+                                        Text(a.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                                    }
+                                    .padding(.leading, 6).padding(.trailing, 12).padding(.vertical, 6)
+                                    .background(Color(.systemGray6), in: Capsule())
+                                }
+                                .buttonStyle(PressableStyle())
+                            }
+                        }
+                    }
+                }
+                .padding(14)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .shadow(color: .black.opacity(0.12), radius: 14, y: 4)
+                .padding(.horizontal, 12)
+                .padding(.top, 4)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(Motion.smooth, value: state.invite)
     }
 }

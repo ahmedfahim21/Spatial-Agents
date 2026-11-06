@@ -26,8 +26,8 @@ struct OnboardingView: View {
 
             TabView(selection: $page) {
                 IntroPage(art: AnyView(LookArt()),
-                          title: "Look, then nod",
-                          text: "Turn toward an agent and it lights up. Nod and it says hello, then just talk. Shake your head to end.")
+                          title: "Turn, then double nod",
+                          text: "Turn your head left or right and that agent lights up. Double nod and it says hello, then just talk. Double shake or say bye to end.")
                     .tag(0)
                 IntroPage(art: AnyView(FindArt()),
                           title: "Find agents around you",

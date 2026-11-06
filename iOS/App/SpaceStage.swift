@@ -1,14 +1,13 @@
 import SwiftUI
 
-/// Your personal space from your own eyes: a window on your left and one on your right,
-/// with a dot where you're looking. Editing: tap a window to choose who sits in it.
+/// Your personal space from your own eyes: a window on your left and one on your right; the
+/// picked one is ringed. Editing: tap a window to choose who sits in it.
 struct SpaceStage: View {
     @Environment(MobileState.self) private var state
     var editing = false
 
-    // The visible span: 75° either side, 30° above and below eye level.
+    // The visible span: 75° either side.
     private let azRange = 75.0
-    private let elRange = 30.0
 
     var body: some View {
         GeometryReader { geo in
@@ -16,19 +15,9 @@ struct SpaceStage: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 24, style: .continuous)
                     .fill(Color(.secondarySystemGroupedBackground))
-                // Front: kept clear.
-                Path { p in
-                    p.move(to: CGPoint(x: xPos(0, w), y: 34)); p.addLine(to: CGPoint(x: xPos(0, w), y: h - 34))
-                }
-                .stroke(Color(.systemGray4), style: StrokeStyle(lineWidth: 1, dash: [3, 6]))
-                Text("FORWARD").font(.system(size: 9, weight: .semibold)).tracking(1.5)
-                    .foregroundStyle(.tertiary)
-                    .position(x: xPos(0, w), y: h - 18)
-
                 ForEach(Zone.allCases) { zone in
                     window(zone).position(x: xPos(zone.azimuth, w), y: h / 2)
                 }
-                gazeDot(w: w, h: h)
             }
         }
         .animation(Motion.smooth, value: state.zones)
@@ -102,27 +91,8 @@ struct SpaceStage: View {
         }
     }
 
-    @ViewBuilder private func gazeDot(w: CGFloat, h: CGFloat) -> some View {
-        if state.hasHeadData {
-            let yaw = state.headYaw, pitch = state.headPitch
-            ZStack {
-                Circle().fill(Color.primary.opacity(0.08)).frame(width: 34, height: 34)
-                Circle().stroke(Color.primary, lineWidth: 2).frame(width: 16, height: 16)
-                Circle().fill(Color.primary).frame(width: 4, height: 4)
-            }
-            .position(x: xPos(max(-azRange, min(azRange, yaw)), w), y: yPos(max(-elRange, min(elRange, pitch)), h))
-            .allowsHitTesting(false)
-            .transition(.opacity)
-        }
-    }
-
     private func xPos(_ az: Double, _ w: CGFloat) -> CGFloat {
         let inset: CGFloat = 70
         return inset + CGFloat((az + azRange) / (2 * azRange)) * (w - 2 * inset)
-    }
-
-    private func yPos(_ el: Double, _ h: CGFloat) -> CGFloat {
-        let inset: CGFloat = 40
-        return inset + CGFloat((elRange - el) / (2 * elRange)) * (h - 2 * inset)
     }
 }

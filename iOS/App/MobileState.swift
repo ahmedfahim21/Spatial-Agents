@@ -8,9 +8,9 @@ enum ConversationPhase: Equatable {
 }
 
 /// The phone app's brain. Two kinds of agents share one spatial scene:
-/// - body-anchored agents sit in a ring around you and travel with you (BodyFollower frame);
+/// - your agents sit on your left and right, fixed to your head: turn left or right to pick one;
 /// - geo-anchored agents sit where they are in the world (compass frame), once you've arrived.
-/// Look at one and it lights up; nod and it wakes; then you talk hands-free. Shake to end.
+/// Pick one and it lights up; nod (or tap) and it wakes; then you talk hands-free. Shake to end.
 @Observable @MainActor
 final class MobileState {
     let voices = VoiceRouter()
@@ -19,20 +19,14 @@ final class MobileState {
     let location = LocationService()
     let haptics = Haptics()
     private let tracker = HeadTracker()
-    /// Your left or right agent, picked by a quick turn of the head from wherever you face.
-    @ObservationIgnored private let glance = GlanceTracker()
-    /// The phone turning with you means your body turned (not just your head).
-    @ObservationIgnored private let phoneTurn = PhoneTurn()
-    /// How far a glance turns, degrees: 10 small, 14 medium, 20 large.
-    var glanceSize = UserDefaults.standard.object(forKey: "glanceSize") as? Double ?? 14 {
-        didSet {
-            UserDefaults.standard.set(glanceSize, forKey: "glanceSize")
-            glance.threshold = glanceSize
-        }
-    }
-    /// The side you're glancing at right now (the book's page that's lit).
-    private(set) var glanceSide: Zone?
+    /// Picks your left or right agent from which way you turn your head.
+    @ObservationIgnored private let turns = TurnPicker()
+    /// The side you last turned toward: its agent is picked (bigger on screen), waiting for a
+    /// nod or a tap. Not while you're in a conversation; cleared when it ends.
+    private(set) var pickedSide: Zone?
     private let backend = Backend.shared
+    /// Your account's id (anonymous sign-in), for support and recovery.
+    var accountId: String? { backend.userId }
 
     // MARK: State the UI reads
 
@@ -76,8 +70,8 @@ final class MobileState {
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .voice: "Voice and sounds"
-            case .sounds: "Sounds only"
+            case .voice: "Ask me"
+            case .sounds: "Chime only"
             case .off: "Off"
             }
         }
@@ -85,25 +79,91 @@ final class MobileState {
     var announce = Announce(rawValue: UserDefaults.standard.string(forKey: "announce") ?? "") ?? .voice {
         didSet { UserDefaults.standard.set(announce.rawValue, forKey: "announce") }
     }
-    private struct Announcement { let id: UUID; let arrival: Bool; let at: Date }
-    /// Waiting to be said, one at a time.
-    @ObservationIgnored private var announcements: [Announcement] = []
-    /// Agents whose discovery radius you're inside (left at 1.5x the radius).
-    @ObservationIgnored private var discovered: Set<UUID> = []
-    @ObservationIgnored private var lastAnnounced: [UUID: Date] = [:]
-    /// The agent introducing itself right now (placed in the scene while it talks).
-    @ObservationIgnored private var announcing: UUID?
-    @ObservationIgnored private var announcingSince = Date.distantPast
+    /// Walking into a place's radius: Air Agents asks if you want to talk. A double nod is yes
+    /// (and, with more than one place around, it asks which one until it hears a name); a
+    /// double shake is no.
+    struct Invite: Equatable {
+        enum Step { case asking, choosing }
+        let token: UUID
+        var ids: [UUID]
+        var step: Step
+    }
+    private(set) var invite: Invite?
+    @ObservationIgnored private var inviteTask: Task<Void, Never>?
+    @ObservationIgnored private var inviteAnswer: HeadGesture?
+    /// New places around you since the last question.
+    @ObservationIgnored private var inviteNeeded = false
+    /// Places you said no to: not asked again until you leave and come back.
+    @ObservationIgnored private var declinedZones: Set<UUID> = []
+    /// When you walked into each place's radius (the newest is "the place you're at").
+    @ObservationIgnored private var enteredAt: [UUID: Date] = [:]
+    /// Listening for which one, and what's been heard so far.
+    @ObservationIgnored private var choosingListen = false
+    @ObservationIgnored private var choiceHeard = ""
+    @ObservationIgnored private var choiceHeardAt = Date()
+    /// The app's own voice, for questions that aren't from any agent.
+    private let narratorId = UUID(uuidString: "00000000-0000-0000-0000-0000000A11A5")!
+
+    /// How you nod, shake and turn: learnt in the gesture lesson, or the defaults (a yes is a
+    /// double nod, a no a double shake).
+    nonisolated static let defaultProfile = GestureProfile(nodSpeed: 35, nodSize: 10, nodSwings: 3, nodRatio: 1.0,
+                                               shakeSpeed: 70, shakeSize: 15, shakeSwings: 3, window: 1.6,
+                                               turnSize: 15, turnTime: 0.8)
+    var gestureProfile: GestureProfile = {
+        guard let d = UserDefaults.standard.data(forKey: "gestureProfile"),
+              let p = try? JSONDecoder().decode(GestureProfile.self, from: d) else { return MobileState.defaultProfile }
+        return p
+    }() {
+        didSet {
+            UserDefaults.standard.set(try? JSONEncoder().encode(gestureProfile), forKey: "gestureProfile")
+            gesturesLearned = true
+            applyGestures()
+        }
+    }
+    private(set) var gesturesLearned = UserDefaults.standard.data(forKey: "gestureProfile") != nil
+    /// 0.5 (firm) … 2 (light): scales how big and quick every gesture has to be.
+    var gestureSensitivity = UserDefaults.standard.object(forKey: "gestureSensitivity") as? Double ?? 1 {
+        didSet {
+            UserDefaults.standard.set(gestureSensitivity, forKey: "gestureSensitivity")
+            applyGestures()
+        }
+    }
+    /// The gesture lesson is running: gestures are recorded, not acted on.
+    var training = false
+    @ObservationIgnored private var recording: [MotionSample]?
+    /// What the head just did, for the lesson's try-it step.
+    private(set) var lastMove: (name: String, at: Date)?
+
+    func resetGestures() {
+        UserDefaults.standard.removeObject(forKey: "gestureProfile")
+        gestureProfile = Self.defaultProfile
+        UserDefaults.standard.removeObject(forKey: "gestureProfile")
+        gesturesLearned = false
+    }
+
+    private func applyGestures() {
+        let s = max(gestureSensitivity, 0.1)
+        tracker.profile = gestureProfile
+        tracker.sensitivity = s
+        turns.size = gestureProfile.turnSize / s
+        turns.within = gestureProfile.turnTime
+    }
+
+    /// Records head motion for a while (the gesture lesson).
+    func recordMotion(seconds: Double) async -> [MotionSample] {
+        recording = []
+        try? await Task.sleep(for: .seconds(seconds))
+        defer { recording = nil }
+        return recording ?? []
+    }
     @ObservationIgnored private var headphonesIn = false
 
     /// Shops' menus, fetched when you arrive at one (shown over it on the map).
     private(set) var menus: [UUID: [CatalogItem]] = [:]
 
     private(set) var focusedId: UUID?
-    /// Head direction: yaw relative to your body (+ = right) and raw pitch, degrees.
-    /// Rounded to whole degrees and written only when they change, so screens redraw as fast
-    /// as you actually turn rather than at the sensor rate. Audio and focus use the exact values.
-    private(set) var headYaw: Double = 0
+    /// Raw head pitch, degrees. Rounded to whole degrees and written only when it changes, so
+    /// screens redraw as fast as you actually move rather than at the sensor rate.
     private(set) var headPitchRaw: Double = 0
     /// Where your head points in the world, degrees from true north (rounded, for views).
     private(set) var headWorld: Double?
@@ -150,7 +210,7 @@ final class MobileState {
     private(set) var activeLineupId: UUID?
     var activeLineup: Lineup? { lineups.first { $0.id == activeLineupId } }
     @ObservationIgnored private var lastLineupCheck = Date.distantPast
-    /// The user has set their forward direction and arranged their agents.
+    /// The user has arranged their agents.
     private(set) var calibrated = UserDefaults.standard.bool(forKey: "calibrated")
     /// Head pitch when looking straight ahead (AirPods sit differently on everyone).
     private(set) var pitchZero = UserDefaults.standard.double(forKey: "pitchZero")
@@ -181,8 +241,6 @@ final class MobileState {
 
     // MARK: Head frames
 
-    /// Head yaw relative to your body (body agents).
-    @ObservationIgnored private var yawBody: Double = 0
     /// Head yaw in the tracker's fixed frame.
     @ObservationIgnored private var yawFixed: Double = 0
     /// Head pitch, degrees (+ = up).
@@ -200,8 +258,7 @@ final class MobileState {
 
     /// Hands the current pose to views, only where it changed by a degree or more.
     private func publishPose() {
-        let yaw = yawBody.rounded(), pitch = pitchRaw.rounded(), world = exactWorld?.rounded()
-        if yaw != headYaw { headYaw = yaw }
+        let pitch = pitchRaw.rounded(), world = exactWorld?.rounded()
         if pitch != headPitchRaw { headPitchRaw = pitch }
         if world != headWorld { headWorld = world }
     }
@@ -213,11 +270,6 @@ final class MobileState {
     private var bodySlots: [UUID: Zone] = [:]
     /// Geo agents' bearings, frozen when close or when GPS is poor so they don't jitter.
     private var lockedBearing: [UUID: Double] = [:]
-    @ObservationIgnored private var lastFocusAt = Date()
-    /// The agent you were looking at just before focus moved, and when it moved. A nod
-    /// tips your gaze up and down, which can slide focus for a moment mid-gesture.
-    @ObservationIgnored private var previousFocus: (id: UUID, held: TimeInterval, lostAt: Date)?
-    @ObservationIgnored private var lookAwaySince: Date?
     @ObservationIgnored private var lastHeardAt = Date()
     @ObservationIgnored private var listenStartedAt = Date()
     @ObservationIgnored private var lastBeacon = Date.distantPast
@@ -245,39 +297,18 @@ final class MobileState {
             zones = defaultZones
         }
         activeLineupId = currentLineupId()
-        // The tracker reports head yaw in a fixed frame; GlanceTracker works out where "rest"
-        // (your body, roughly) is, so agents stay on your left and right as you turn and walk.
+        // Only head movement counts, never where it points: there's no forward to set or drift.
         tracker.followMe = false
-        glance.threshold = glanceSize
         tracker.onStatus = { [weak self] s in
             print("Agentsphere: tracking status: \(s)")
             self?.trackingStatus = s
         }
-        tracker.onYaw = { [weak self] y in
-            guard let self else { return }
-            let now = ProcessInfo.processInfo.systemUptime
-            let phone = self.phoneTurn
-            let engaged = self.activeId != nil && self.phase != .idle
-            if self.glance.feed(time: now, yaw: y, phone: { phone.yaw(at: $0) }, engaged: engaged) {
-                let side = self.glance.side.map { $0 == .left ? Zone.left : Zone.right }
-                print("Agentsphere: glance \(side?.name ?? "back to rest") (offset \(Int(self.glance.offset))°)")
-                self.glanceSide = side
-            }
-            self.yawBody = self.glance.offset
-            self.lastHeadAt = Date()
-            if !self.hasHeadData {
-                self.hasHeadData = true
-                print("Agentsphere: head motion flowing")
-            }
-            if Date().timeIntervalSince(self.lastYawLog) > 2 {
-                self.lastYawLog = Date()
-                print(String(format: "Agentsphere: head %.0f° from rest (fixed %.0f°) pitch %.0f°", self.yawBody, self.yawFixed, self.pitchRaw))
-            }
-            self.updateScene()
-        }
-        tracker.onFixedYaw = { [weak self] y in self?.yawFixed = y }
+        tracker.onFixedYaw = { [weak self] y in self?.headMoved(yaw: y) }
         tracker.onPitch = { [weak self] p in self?.pitchRaw = p }
         tracker.onGesture = { [weak self] g in self?.handleGesture(g) }
+        tracker.onSample = { [weak self] t, y, p in self?.recording?.append(MotionSample(t: t, yaw: y, pitch: p)) }
+        applyGestures()
+        tracker.onDebug = { print("Agentsphere: \($0)") }
         tracker.isEngaged = { [weak self] in
             guard let self else { return false }
             return self.activeId != nil && self.phase != .idle
@@ -309,7 +340,7 @@ final class MobileState {
         AudioSession.configure()
         refreshRoute()
         tracker.start()
-        phoneTurn.start()
+        audio.register(id: narratorId, azimuth: 0, voiceIndex: 0)
         location.start()
         Task { await refreshMine() }
         Task { await refreshIdentity() }
@@ -491,7 +522,6 @@ final class MobileState {
         for a in nearby where a.isGeo {
             guard let d = distance(to: a) else { continue }
             let r = arrivalRadius(for: a)
-            noteDiscovery(a, distance: d, arrivalRadius: r)
             if d <= r {
                 if !now.contains(a.id) {
                     now.insert(a.id)
@@ -504,7 +534,13 @@ final class MobileState {
             } else if d > r + 10, now.contains(a.id) {
                 now.remove(a.id)
                 lockedBearing[a.id] = nil
+                enteredAt[a.id] = nil
+                declinedZones.remove(a.id)
                 if activeId == a.id { endConversation() }
+                if var inv = invite, inv.ids.contains(a.id) {
+                    inv.ids.removeAll { $0 == a.id }
+                    if inv.ids.isEmpty { endInvite(declined: false) } else { invite = inv }
+                }
             }
         }
         if now != arrived { arrived = now; syncPlacement() }
@@ -518,89 +554,22 @@ final class MobileState {
         ensurePlaced(a)
         audio.setGain(id: a.id, gain: 1)
         audio.setCloseness(id: a.id, 1)
-        if announce == .voice, headphonesIn {
-            // "You're at …" goes ahead of any discoveries waiting.
-            announcements.removeAll { $0.id == a.id }
-            announcements.insert(Announcement(id: a.id, arrival: true, at: Date()), at: 0)
-        } else if announce != .off {
-            audio.cue(.chime, from: a.id)
+        enteredAt[a.id] = Date()
+        print("Agentsphere: entered \(a.name)'s zone")
+        switch announce {
+        case .voice: inviteNeeded = true
+        case .sounds: audio.cue(.chime, from: a.id)
+        case .off: break
         }
     }
 
-    // MARK: - Announcements
-
-    /// Inside this, an agent introduces itself: a little beyond where you'd arrive.
-    private func discoveryRadius(_ arrival: Double) -> Double { arrival + 60 }
-
-    /// Entering an agent's discovery radius queues its introduction; leaving (at 1.5x the
-    /// radius, so a jittery fix at the edge doesn't count) lets it introduce itself again.
-    private func noteDiscovery(_ a: Agent, distance d: Double, arrivalRadius r: Double) {
-        let radius = discoveryRadius(r)
-        if d < radius, d > r, !discovered.contains(a.id) {
-            discovered.insert(a.id)
-            let recent = lastAnnounced[a.id].map { Date().timeIntervalSince($0) < 60 } ?? false
-            if !recent, findTargetId != a.id, !announcements.contains(where: { $0.id == a.id }) {
-                announcements.append(Announcement(id: a.id, arrival: false, at: Date()))
-            }
-        } else if d > radius * 1.5 {
-            discovered.remove(a.id)
-        }
+    /// Places whose radius you're in, the one you walked into last first.
+    private var zonesHere: [Agent] {
+        nearby.filter { arrived.contains($0.id) }
+            .sorted { (enteredAt[$0.id] ?? .distantPast) > (enteredAt[$1.id] ?? .distantPast) }
     }
 
-    /// Says the next introduction when nothing else is talking: one at a time, nearest first.
-    private func announceTick() {
-        if let current = announcing {
-            // Keep it in the scene until its line has played, then let it go.
-            if !audio.isSpeaking, Date().timeIntervalSince(announcingSince) > 1.5 {
-                announcing = nil
-                if current != activeId { syncPlacement() }
-            }
-            return
-        }
-        guard announce != .off, headphonesIn, activeId == nil, !audio.isSpeaking else {
-            if announce == .off || !headphonesIn { announcements.removeAll() }
-            return
-        }
-        announcements.removeAll { item in
-            Date().timeIntervalSince(item.at) > 45 || agent(item.id) == nil
-                || (!item.arrival && (!discovered.contains(item.id) || arrived.contains(item.id)))
-        }
-        guard !announcements.isEmpty else { return }
-        let next = announcements.first(where: \.arrival)
-            ?? announcements.min { (distanceTo($0.id) ?? .infinity) < (distanceTo($1.id) ?? .infinity) }!
-        announcements.removeAll { $0.id == next.id }
-        guard let a = agent(next.id) else { return }
-        say(a, arrival: next.arrival)
-    }
-
-    private func distanceTo(_ id: UUID) -> Double? { agent(id).flatMap(distance(to:)) }
-
-    private func say(_ a: Agent, arrival: Bool) {
-        announcing = a.id
-        announcingSince = Date()
-        lastAnnounced[a.id] = Date()
-        syncPlacement()
-        if !arrival, let d = distance(to: a) {
-            audio.setCloseness(id: a.id, max(0.25, 1 - d / 300))
-        }
-        let direction = exactAngle(a.id).map(Words.voiceDirection)
-        print("Agentsphere: announce \(a.name) (\(arrival ? "arrival" : "nearby"), \(direction ?? "no direction"))")
-        if !arrival { haptics.light() }
-        guard announce == .voice else {
-            audio.cue(.chime, from: a.id)
-            return
-        }
-        let line: String
-        if arrival {
-            line = "You're at \(a.name)." + (hasHeadData ? " Look toward it and nod to talk." : "")
-        } else {
-            let far = distance(to: a).map { GeoMath.spoken(distance: $0, accuracy: location.accuracy) }
-            line = [a.name, direction, far].compactMap { $0 }.joined(separator: ", ") + "."
-        }
-        audio.speak(line, from: a.id, prelude: .chime)
-    }
-
-    /// Find mode: haptics and a beacon from the agent's real direction, stronger as you near it.
+    /// Find mode: haptics and a beacon, quicker as you near it.
     private func findTargetChanged() {
         haptics.distance = nil
         proximityFresh = true
@@ -624,8 +593,6 @@ final class MobileState {
         }
         let beyond = max(0, d - arrivalRadius(for: a))
         haptics.distance = beyond
-        audio.setGain(id: id, gain: GeoMath.beaconGain(distance: beyond))
-        audio.setCloseness(id: id, 1 - min(beyond, 250) / 250)
         updateProximity(beyond: beyond)
         updateTrend(d)
     }
@@ -704,7 +671,6 @@ final class MobileState {
         want.formUnion(arrived)
         if let f = findTargetId { want.insert(f) }
         if let active = activeId { want.insert(active) }
-        if let speaking = announcing { want.insert(speaking) }
 
         for id in placed.subtracting(want) {
             audio.remove(id: id)
@@ -846,17 +812,6 @@ final class MobileState {
         syncPlacement()
     }
 
-    /// "This is forward": the current head direction becomes the front of your space.
-    func calibrateForward() {
-        tracker.recenter()
-        glance.reset()
-        pitchZero = pitchRaw
-        UserDefaults.standard.set(pitchZero, forKey: "pitchZero")
-        worldOffset = nil
-        calibrateWorld()
-        updateScene()
-    }
-
     func finishSetup() {
         calibrated = true
         UserDefaults.standard.set(true, forKey: "calibrated")
@@ -871,25 +826,16 @@ final class MobileState {
     }
 
     /// Angle of an agent relative to where your head points (0 = straight ahead, + = right).
-    /// For views: the agent's direction from the published (whole-degree) pose.
-    func relativeAngle(_ id: UUID) -> Double? { angle(id, yaw: headYaw, world: headWorld) }
-
-    /// For views: the agent's height relative to your gaze (body agents only).
-    func relativeElevation(_ id: UUID) -> Double? { elevation(id, pitch: headPitch) }
+    /// Your agents are fixed to your head: the left one is always on your left. Agents out in
+    /// the world come from the compass. For views: from the published (whole-degree) pose.
+    func relativeAngle(_ id: UUID) -> Double? { angle(id, world: headWorld) }
 
     /// For audio and focus: the exact pose.
-    private func exactAngle(_ id: UUID) -> Double? { angle(id, yaw: yawBody, world: exactWorld) }
-    private func exactElevation(_ id: UUID) -> Double? { elevation(id, pitch: pitchRaw - pitchZero) }
 
-    private func angle(_ id: UUID, yaw: Double, world: Double?) -> Double? {
-        if let zone = bodySlots[id], withMe { return normalizeAngle(zone.azimuth - yaw) }
+    private func angle(_ id: UUID, world: Double?) -> Double? {
+        if let zone = bodySlots[id], withMe { return zone.azimuth }
         guard let a = agent(id), a.isGeo, let b = bearing(to: a), let world else { return nil }
         return normalizeAngle(b - world)
-    }
-
-    private func elevation(_ id: UUID, pitch: Double) -> Double? {
-        guard let zone = bodySlots[id], withMe else { return nil }
-        return zone.elevation - pitch
     }
 
     /// Agents you can look at and wake right now.
@@ -898,44 +844,29 @@ final class MobileState {
     }
 
     private func updateScene() {
+        // Your agents sit left and right of you. Agents out in the world have no direction:
+        // their voices play straight, as a plain voice.
         for id in placed {
-            guard let rel = exactAngle(id) else { continue }
-            audio.setDirection(id: id, azimuth: rel, elevation: exactElevation(id) ?? 0)
+            if let zone = bodySlots[id], withMe {
+                audio.setDirection(id: id, azimuth: zone.azimuth, elevation: zone.elevation)
+            } else {
+                audio.setDirection(id: id, azimuth: 0, elevation: 0)
+            }
         }
         updateFocus()
         publishPose()
     }
 
     private func updateFocus() {
-        // Body agents: how far your gaze is from them, sideways and up/down.
-        // Geo agents: sideways only (you're often looking down at the phone while finding).
-        // On Create or Settings, your gaze is on the phone: no pings, no waking agents.
-        // Body agents need AirPods: without head tracking there's no gaze, and the agent in
-        // front would wake on its own.
-        let pool = (lookingEnabled ? talkable : talkable.filter { $0.id == activeId })
-            .filter { hasHeadData || $0.isGeo }
-        // Your agents: the side you glance at. Agents out in the world: where you look.
-        let glanced = glanceSide.flatMap { side in pool.first { bodySlots[$0.id] == side } }
-        let candidates = pool.filter { bodySlots[$0.id] == nil || !withMe }.compactMap { a -> (UUID, Double)? in
-            guard let az = exactAngle(a.id) else { return nil }
-            guard let el = exactElevation(a.id) else { return (a.id, abs(az)) }
-            return (a.id, (az * az + el * el * 1.2).squareRoot())
-        }
-        var next: UUID?
-        if let glanced {
-            next = glanced.id
-        } else if let cur = focusedId, let c = candidates.first(where: { $0.0 == cur }), c.1 < 34 {
-            next = cur   // hysteresis: keep focus until clearly looking elsewhere
-        } else if let best = candidates.filter({ $0.1 < 24 }).min(by: { $0.1 < $1.1 }) {
-            next = best.0
-        }
+        // Your agents: the side you last turned toward (needs AirPods; a tap works without).
+        // Places out in the world aren't picked by looking: you're asked when you walk in.
+        // On Create or Settings, your attention is on the phone: no pings, no waking agents.
+        let pool = (lookingEnabled || arranging ? talkable : talkable.filter { $0.id == activeId })
+            .filter { hasHeadData && bodySlots[$0.id] != nil }
+        let next = pickedSide.flatMap { side in pool.first { bodySlots[$0.id] == side } }?.id
         if next != focusedId {
-            print("Agentsphere: focus → \(agent(next)?.name ?? "nobody") (yaw \(Int(yawBody))°, pitch \(Int(pitchRaw - pitchZero))°)")
-            if let cur = focusedId {
-                previousFocus = (cur, Date().timeIntervalSince(lastFocusAt), Date())
-            }
+            print("Agentsphere: focus → \(agent(next)?.name ?? "nobody")")
             focusedId = next
-            lastFocusAt = Date()
             if let n = next, n != activeId {
                 audio.ping(from: n, high: false)
                 haptics.tap(intensity: 0.4, sharpness: 0.3)
@@ -953,10 +884,13 @@ final class MobileState {
             hasHeadData = false
             trackingStatus = "AirPods head tracking paused. Put your AirPods in to look around."
         }
-        if !hasHeadData { updateScene() }   // phone heading drives focus without AirPods
+        if !hasHeadData { updateScene() }   // the phone's heading still turns the Find arrow
         beaconTick()
-        announceTick()
+        inviteTick()
         checkLineup()
+        // A no means something only in a conversation or a question: otherwise a big turn
+        // could pass for one.
+        tracker.detectShakes = activeId != nil || invite != nil || training
 
         // Conversation housekeeping.
         guard let active = activeId else { return }
@@ -965,10 +899,6 @@ final class MobileState {
             lastThinkingPulse = Date()
             audio.cue(.thinking, from: active)
         }
-        let looking = exactAngle(active).map { abs($0) < 50 } ?? true
-        if looking { lookAwaySince = nil } else if lookAwaySince == nil { lookAwaySince = Date() }
-        let idle = phase == .listening && transcript.isEmpty
-        if idle, let since = lookAwaySince, Date().timeIntervalSince(since) > 5 { endConversation(); return }
         if phase == .listening {
             // A word or two and a pause ("Can you…") usually means you're still thinking.
             let words = transcript.split(separator: " ").count
@@ -1035,9 +965,12 @@ final class MobileState {
     /// Starts talking with an agent (after a nod, or a tap).
     func wake(_ a: Agent) {
         print("Agentsphere: wake \(a.name)")
+        if invite != nil { endInvite(declined: false, keepMic: true) }
         if activeId != nil, activeId != a.id { endConversation() }
         activeId = a.id
-        lookAwaySince = nil
+        // The agent you're talking to stays picked, however you woke it (nod, tap, wake word).
+        pickedSide = withMe ? zones[a.id] : nil
+        updateFocus()
         asleep.remove(a.id)
         failing.remove(a.id)
         ensurePlaced(a)
@@ -1053,11 +986,13 @@ final class MobileState {
         audio.speak(line, from: a.id, prelude: .chime)
     }
 
-    func endConversation() {
+    func endConversation(file: String = #fileID, line: Int = #line) {
+        if let id = activeId { print("Agentsphere: ended \(agent(id)?.name ?? "conversation") (\(file):\(line))") }
         typingMode = false
         if isListeningNow { _ = speech.finish() }
         if !speech.keepsInputOpen { speech.shutdown() }
         if let id = activeId {
+            audio.silence(id: id)
             haptics.ended()
             asleep.insert(id)
             // Asleep for a while, then back to normal.
@@ -1069,6 +1004,7 @@ final class MobileState {
         activeId = nil
         phase = .idle
         transcript = ""
+        pickedSide = nil
         syncPlacement()
     }
 
@@ -1116,20 +1052,56 @@ final class MobileState {
     }
 
     private func heard(_ text: String) {
+        if choosingListen {
+            choiceHeard = text
+            choiceHeardAt = Date()
+            return
+        }
         guard phase == .listening else { return }
         transcript = text
         lastHeardAt = Date()
+        // "Bye bye", "goodbye", "never mind": end now, not after the pause and transcription.
+        if Self.isGoodbye(text, instant: true), let id = activeId { deliver(text, to: id) }
+    }
+
+    /// What you said: a goodbye ends the conversation; anything else goes to the agent.
+    private func deliver(_ text: String, to id: UUID) {
+        guard Self.isGoodbye(text) else { return send(text, to: id) }
+        post(ChatMessage(.user, text.trimmingCharacters(in: .whitespacesAndNewlines)), to: id)
+        endConversation()
+        audio.speak("Talk soon.", from: id, prelude: nil)
+    }
+
+    /// Kill words: the whole utterance, so a real request that happens to contain "bye" or
+    /// "stop" still goes through. `instant`: only phrases safe to act on while you may still
+    /// be talking (a lone "stop" might become "stop the timer").
+    static func isGoodbye(_ text: String, instant: Bool = false) -> Bool {
+        let t = text.lowercased()
+            .replacingOccurrences(of: "’", with: "'")
+            .replacingOccurrences(of: "[^a-z' ]", with: "", options: .regularExpression)
+            .split(separator: " ").joined(separator: " ")
+        let now: Set<String> = [
+            "bye bye", "byebye", "goodbye", "good bye", "bye for now", "see you", "see ya", "seeya", "see you later",
+            "talk to you later", "talk later", "that's all", "thats all", "i'm done", "im done", "never mind",
+            "nevermind", "stop talking", "shut up", "be quiet", "stop listening", "end chat", "end the chat",
+        ]
+        let afterPause: Set<String> = [
+            "bye", "cya", "ok bye", "okay bye", "thanks bye", "thank you bye", "bye now", "that's it", "thats it",
+            "thanks i'm done", "thanks im done", "thank you that's all", "thanks that's all", "stop", "cancel",
+            "quiet", "good night", "goodnight",
+        ]
+        return now.contains(t) || (!instant && afterPause.contains(t))
     }
 
     /// You stopped talking. On-device recognition showed your words as you spoke and noticed
     /// the pause; Whisper on 0G has the final say on what you said, with the on-device text as
-    /// the fallback if it's slow or fails.
+    /// the fallback if it's slow or fails. A kill word doesn't wait for Whisper.
     private func finishUtterance() {
         guard let id = activeId else { return }
         let (onDevice, wav) = speech.finishWithAudio()
         let heard = onDevice.isEmpty ? transcript : onDevice
         haptics.light()
-        guard let wav else { send(heard); return }
+        guard let wav, !Self.isGoodbye(heard) else { deliver(heard, to: id); return }
         phase = .thinking
         let isPrivate = agent(id)?.privateInference == true
         Task { @MainActor [weak self] in
@@ -1138,7 +1110,7 @@ final class MobileState {
             guard let self, self.activeId == id, self.phase == .thinking else { return }
             let text = whisper?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             print("Agentsphere: whisper (\(Int(Date().timeIntervalSince(started) * 1000)) ms): \(text.isEmpty ? "–" : text) | on-device: \(heard)")
-            self.send(text.isEmpty ? heard : text, to: id)
+            self.deliver(text.isEmpty ? heard : text, to: id)
         }
     }
 
@@ -1410,37 +1382,293 @@ final class MobileState {
         return true
     }
 
+    /// Each AirPods reading. A quick turn left or right, from wherever you're facing, picks
+    /// that side's agent.
+    private func headMoved(yaw: Double) {
+        yawFixed = yaw
+        lastHeadAt = Date()
+        if !hasHeadData {
+            hasHeadData = true
+            print("Agentsphere: head motion flowing")
+        }
+        if let side = turns.feed(time: ProcessInfo.processInfo.systemUptime, yaw: yaw) { turned(side) }
+        if Date().timeIntervalSince(lastYawLog) > 2 {
+            lastYawLog = Date()
+            print(String(format: "Agentsphere: head yaw %.0f° pitch %.0f°", yaw, pitchRaw))
+        }
+        updateScene()
+    }
+
+    /// You turned your head toward a side: its agent is picked (bigger on screen, a soft tick
+    /// from its side), waiting for a nod or a tap. Not mid-conversation: heads move on their
+    /// own while you talk.
+    private func turned(_ side: Zone) {
+        print("Agentsphere: turned \(side.name)\(activeId == nil ? "" : " (in a conversation: ignored)")")
+        lastMove = ("Turned \(side.name.lowercased())", Date())
+        guard !training, withMe, lookingEnabled || arranging, activeId == nil, invite == nil else { return }
+        let next: Zone? = agent(in: side) == nil ? nil : side   // an empty side picks nobody
+        guard next != pickedSide else { return }
+        pickedSide = next
+        updateFocus()
+    }
+
     private func handleGesture(_ g: HeadGesture) {
         lastGesture = g
+        print("Agentsphere: \(g.rawValue) → \(agent(focusedId)?.name ?? "nobody") (picked \(pickedSide?.name ?? "none"), "
+              + "talking to \(agent(activeId)?.name ?? "nobody"), screen \(screen)\(arranging ? ", arranging" : ""))")
+        lastMove = (g == .nod ? "Yes" : "No", Date())
+        guard !training else { return }
+        // A question waiting: the gesture answers it.
+        if invite != nil {
+            inviteAnswer = g
+            return
+        }
         switch g {
         case .shake:
-            // Shake while talking: stop this conversation.
-            if activeId != nil { endConversation() }
+            // No, any time: while the agent talks, thinks or waits for you. Except while you're
+            // mid-sentence, when heads move on their own.
+            guard activeId != nil else { return }
+            let midSentence = phase == .listening && !transcript.isEmpty && Date().timeIntervalSince(lastHeardAt) < 1.2
+            guard !midSentence else {
+                print("Agentsphere: shake ignored (you're mid-sentence)")
+                return
+            }
+            endConversation()
         case .nod:
-            // Nod at the agent you're looking at: wake it.
-            guard !arranging, let target = nodTarget, target != activeId, let a = agent(target) else { return }
-            wake(a)
+            // Yes: the agent you picked by turning. Otherwise, inside a place's radius, that
+            // place (asking which one if you're in more than one).
+            guard !arranging, activeId == nil || focusedId != activeId else { return }
+            if let target = focusedId, target != activeId, let a = agent(target) {
+                wake(a)
+            } else if activeId == nil, !zonesHere.isEmpty {
+                let here = zonesHere
+                if here.count == 1 { wake(here[0]) } else { startInvite(here.map(\.id), choosing: true) }
+            }
         }
     }
 
-    /// Who a nod is meant for: the agent you were settled on as the nod began. If the nod
-    /// itself slid focus off it (or onto a neighbour), that one still counts.
-    private var nodTarget: UUID? {
-        if let p = previousFocus, p.held > 0.4, Date().timeIntervalSince(p.lostAt) < 1.2,
-           focusedId == nil || Date().timeIntervalSince(lastFocusAt) < 1.2 {
-            return p.id
+    // MARK: - Places around you
+
+    /// Asks once you're inside new places' radius, when nothing else is going on.
+    private func inviteTick() {
+        guard inviteNeeded, invite == nil, activeId == nil, !training, !arranging, !audio.isSpeaking else { return }
+        guard announce == .voice, headphonesIn else { inviteNeeded = false; return }
+        inviteNeeded = false
+        let ids = zonesHere.map(\.id).filter { !declinedZones.contains($0) }
+        guard !ids.isEmpty else { return }
+        startInvite(zonesHere.map(\.id))
+    }
+
+    private func startInvite(_ ids: [UUID], choosing: Bool = false) {
+        inviteTask?.cancel()
+        let token = UUID()
+        invite = Invite(token: token, ids: ids, step: choosing ? .choosing : .asking)
+        inviteAnswer = nil
+        print("Agentsphere: invite \(ids.compactMap { agent($0)?.name }) (\(choosing ? "which one" : "asking"))")
+        inviteTask = Task { @MainActor [weak self] in await self?.runInvite(token, choosing: choosing) }
+    }
+
+    /// Closes the question. `declined`: you said no, so these places don't ask again until
+    /// you leave and come back.
+    func endInvite(declined: Bool, keepMic: Bool = false) {
+        guard let inv = invite else { return }
+        print("Agentsphere: invite closed (\(declined ? "no" : "done"))")
+        if declined { declinedZones.formUnion(inv.ids) }
+        invite = nil
+        inviteTask?.cancel()
+        inviteTask = nil
+        if choosingListen {
+            choosingListen = false
+            _ = speech.finish()
         }
-        return focusedId
+        speech.hints = []
+        if !keepMic, !speech.keepsInputOpen { speech.shutdown() }
+    }
+
+    /// From the banner: talk to this one.
+    func acceptInvite(_ id: UUID) {
+        guard let a = agent(id) else { return }
+        wake(a)
+    }
+
+    private func runInvite(_ token: UUID, choosing: Bool) async {
+        func live() -> Bool { invite?.token == token && !Task.isCancelled }
+        var agents: [Agent] { (invite?.ids ?? []).compactMap(agent) }
+        guard !agents.isEmpty else { return endInvite(declined: false) }
+
+        if !choosing {
+            let line = agents.count == 1
+                ? "You're at \(agents[0].name). Want to talk?"
+                : "\(Words.count(agents.count).capitalized) places around you: \(Self.spokenList(agents.map(\.name))). Want to talk to one?"
+            await narrate(line)
+            // Yes or no, for up to 15 seconds.
+            let deadline = Date().addingTimeInterval(15)
+            while live(), inviteAnswer == nil, Date() < deadline { try? await Task.sleep(for: .milliseconds(100)) }
+            guard live() else { return }
+            switch inviteAnswer {
+            case .shake?:
+                endInvite(declined: true)
+                await narrate("Okay.")
+                return
+            case .nod?:
+                break
+            case nil:
+                return endInvite(declined: false)
+            }
+            if agents.count == 1 { return wake(agents[0]) }
+            invite?.step = .choosing
+        }
+
+        // Which one: keeps asking until a name matches, or you say no.
+        var misses = 0, silences = 0
+        while live() {
+            let names = Self.spokenList(agents.map(\.name), or: true)
+            await narrate(misses > 0 ? "Sorry, which one? \(names)?" : silences > 0 ? "Which one would you like? \(names)?" : "Which one? \(names)?")
+            guard live() else { return }
+            inviteAnswer = nil
+            switch await listenForChoice(agents, token: token) {
+            case .picked(let a):
+                print("Agentsphere: picked \(a.name)")
+                return wake(a)
+            case .missed:
+                misses += 1
+            case .silence:
+                silences += 1
+                if silences >= 3 { return endInvite(declined: false) }
+            case .no:
+                endInvite(declined: true)
+                await narrate("Okay.")
+                return
+            case .gone:
+                return
+            }
+        }
+    }
+
+    private enum Choice { case picked(Agent), missed, silence, no, gone }
+
+    /// One answer: matched as you speak (no waiting for the pause), or judged after it.
+    private func listenForChoice(_ agents: [Agent], token: UUID) async -> Choice {
+        speech.recordsAudio = false
+        speech.hints = agents.map(\.name)
+        choiceHeard = ""
+        choiceHeardAt = Date()
+        let error: String? = await withCheckedContinuation { c in speech.begin { c.resume(returning: $0) } }
+        if let error {
+            print("Agentsphere: which-one listening failed: \(error)")
+            try? await Task.sleep(for: .seconds(1))
+            return .silence
+        }
+        choosingListen = true
+        audio.cue(.listening, from: narratorId)
+        let started = Date()
+        defer {
+            if choosingListen {
+                choosingListen = false
+                _ = speech.finish()
+            }
+        }
+        while true {
+            try? await Task.sleep(for: .milliseconds(100))
+            guard invite?.token == token, !Task.isCancelled else { return .gone }
+            if inviteAnswer == .shake { return .no }
+            let text = choiceHeard
+            if text.isEmpty {
+                if Date().timeIntervalSince(started) > 8 { return .silence }
+                continue
+            }
+            if Self.isGoodbye(text, instant: true) || Self.isRefusal(text) { return .no }
+            if let a = Self.match(text, among: agents) { return .picked(a) }
+            if Date().timeIntervalSince(choiceHeardAt) > 1.4 {
+                print("Agentsphere: which one? heard \"\(text)\": no match")
+                return .missed
+            }
+        }
+    }
+
+    /// Says a line in the app's own voice and waits for it to finish.
+    private func narrate(_ line: String) async {
+        print("Agentsphere: narrator: \(line)")
+        audio.speak(line, from: narratorId, prelude: nil)
+        let deadline = Date().addingTimeInterval(20)
+        try? await Task.sleep(for: .milliseconds(150))
+        while audio.isSpeaking, Date() < deadline { try? await Task.sleep(for: .milliseconds(100)) }
+    }
+
+    /// "A and B", "A, B and C" (or "A, or B").
+    static func spokenList(_ names: [String], or: Bool = false) -> String {
+        guard names.count > 1 else { return names.first ?? "" }
+        return names.dropLast().joined(separator: ", ") + (or ? ", or " : " and ") + names.last!
+    }
+
+    static func isRefusal(_ text: String) -> Bool {
+        let t = normalized(text)
+        return ["no", "nope", "none", "neither", "no thanks", "no thank you", "not now", "nothing", "cancel"].contains(t)
+    }
+
+    private static func normalized(_ text: String) -> String {
+        text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+            .replacingOccurrences(of: "[^a-z0-9 ]", with: " ", options: .regularExpression)
+            .split(separator: " ").joined(separator: " ")
+    }
+
+    /// Rough sound-alike spelling, so "Geo Cafe" finds "Jio Café".
+    private static func soundKey(_ w: String) -> String {
+        var k = w.replacingOccurrences(of: "ph", with: "f")
+        for (a, b) in [("j", "g"), ("c", "k"), ("q", "k"), ("y", "i"), ("z", "s"), ("ee", "i"), ("ea", "i"), ("oo", "u"), ("e", "i")] {
+            k = k.replacingOccurrences(of: a, with: b)
+        }
+        var out = ""
+        for ch in k where out.last != ch { out.append(ch) }
+        return out
+    }
+
+    private static func similarity(_ a: String, _ b: String) -> Double {
+        let x = Array(a), y = Array(b)
+        guard !x.isEmpty, !y.isEmpty else { return 0 }
+        var row = Array(0...y.count)
+        for i in 1...x.count {
+            var prev = row[0]
+            row[0] = i
+            for j in 1...y.count {
+                let cur = row[j]
+                row[j] = min(row[j] + 1, row[j - 1] + 1, prev + (x[i - 1] == y[j - 1] ? 0 : 1))
+                prev = cur
+            }
+        }
+        return 1 - Double(row[y.count]) / Double(max(x.count, y.count))
+    }
+
+    /// Which agent a spoken answer names: by name (sound-alikes forgiven) or by order
+    /// ("the first one", "second"). Nil when it's unclear.
+    static func match(_ text: String, among agents: [Agent]) -> Agent? {
+        let t = normalized(text)
+        let words = t.split(separator: " ").map(String.init)
+        // Pairs too, so "eth global" can match "ETHGlobal".
+        let spoken = words + zip(words, words.dropFirst()).map { $0 + $1 }
+        let stop: Set<String> = ["the", "a", "an", "of", "and", "at", "to", "my", "for", "in", "on"]
+        var scores: [(Agent, Double)] = agents.map { a in
+            let name = normalized(a.name)
+            if t.replacingOccurrences(of: " ", with: "").contains(name.replacingOccurrences(of: " ", with: "")) { return (a, 1) }
+            let tokens = name.split(separator: " ").map(String.init).filter { !stop.contains($0) && $0.count >= 2 }
+            let best = tokens.map { tok in
+                spoken.map { w in max(similarity(tok, w), similarity(soundKey(tok), soundKey(w))) }.max() ?? 0
+            }.max() ?? 0
+            return (a, best)
+        }
+        scores.sort { $0.1 > $1.1 }
+        if let top = scores.first, top.1 >= 0.75, scores.count < 2 || top.1 - scores[1].1 >= 0.15 { return top.0 }
+        // By order: "first", "the second one", "last"; a bare number only when nothing else says.
+        if words.contains("last"), let a = agents.last { return a }
+        for (i, w) in ["first", "second", "third"].enumerated() where i < agents.count && words.contains(w) { return agents[i] }
+        for (i, w) in [["one", "1"], ["two", "2"], ["three", "3"]].enumerated() where i < agents.count && words.count <= 3 && w.contains(where: words.contains) {
+            return agents[i]
+        }
+        return nil
     }
 
     // MARK: - Misc
-
-    func recenter() {
-        tracker.recenter()
-        glance.reset()
-        worldOffset = nil
-        calibrateWorld()
-    }
 
     /// Short name of where sound is going ("AirPods Pro"). Cached: asking the audio session
     /// is too slow to do on every redraw.
@@ -1467,7 +1695,9 @@ final class MobileState {
     func refreshRoute() {
         route = AudioSession.routeDescription
         highQualityMic = AudioSession.highQualityMic
-        routeName = AVAudioSession.sharedInstance().currentRoute.outputs.first?.portName ?? "Headphones"
+        let name = AVAudioSession.sharedInstance().currentRoute.outputs.first?.portName ?? "Headphones"
+        if name != routeName { print("Agentsphere: audio out → \(name)") }
+        routeName = name
         headphonesIn = AudioSession.headphonesConnected
     }
 

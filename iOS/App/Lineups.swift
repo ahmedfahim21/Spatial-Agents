@@ -149,7 +149,7 @@ private struct LineupEditor: View {
                     agentPicker("Left window", zone: .left)
                     agentPicker("Right window", zone: .right)
                 } footer: {
-                    Text("Glance left or right and nod to talk to them.")
+                    Text("Turn left or right to pick one, then double nod to talk.")
                 }
                 if !isNew {
                     Section {

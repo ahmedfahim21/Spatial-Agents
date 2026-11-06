@@ -27,6 +27,7 @@
 		56A32DAAF9F4CAB9CA9DF247 /* Payments.swift in Sources */ = {isa = PBXBuildFile; fileRef = 671C0812D64D154BA89F8B87 /* Payments.swift */; };
 		606FF9686D034A823B9403C1 /* SetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F2F318535326CF01C65DE81 /* SetupView.swift */; };
 		643E59DFA0B4A1D7AB012C4A /* AgentsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91D87BBBE986BED91DEE366F /* AgentsView.swift */; };
+		661374E2DA37C044259631DA /* GestureLesson.swift in Sources */ = {isa = PBXBuildFile; fileRef = C775FDBD57225D342B53A04C /* GestureLesson.swift */; };
 		68905B9AA26384CC2E810ADC /* AudioCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F68D207AE23DC67D59CC51E /* AudioCore.swift */; };
 		711203F7DB33AFCDFF87D218 /* MobileState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CFB8E080CD8FD26234ABA4D /* MobileState.swift */; };
 		74990383F5AF620D0D0563D1 /* ExploreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F2DD316B90227E4E4F68B2F /* ExploreView.swift */; };
@@ -86,6 +87,7 @@
 		A9044571EEF85C5469B0623E /* HeadTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadTracker.swift; sourceTree = "<group>"; };
 		B57B94C786F17730C8DE2D42 /* AudioSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSession.swift; sourceTree = "<group>"; };
 		B69F15A31B9B49E666E03F9C /* SpatialAudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpatialAudio.swift; sourceTree = "<group>"; };
+		C775FDBD57225D342B53A04C /* GestureLesson.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GestureLesson.swift; sourceTree = "<group>"; };
 		CE8B797E41D3654BCD51DBB4 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		CED646D675DD68032EC19A40 /* ConversationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationStore.swift; sourceTree = "<group>"; };
 		D3F89D81A0A6865B0425894D /* PhoneTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneTools.swift; sourceTree = "<group>"; };
@@ -165,6 +167,7 @@
 				8F2DD316B90227E4E4F68B2F /* ExploreView.swift */,
 				E864C79FC8DB3608130090D1 /* FindView.swift */,
 				5241CFF9F58D3214E5B9A117 /* GeoMath.swift */,
+				C775FDBD57225D342B53A04C /* GestureLesson.swift */,
 				21C3D1A47DBF00BAC44386F8 /* Glance.swift */,
 				4D6559DE46AF8B2FBED0ADAF /* Haptics.swift */,
 				A3B2F17A42BC791B0509F143 /* Info.plist */,
@@ -283,6 +286,7 @@
 				74990383F5AF620D0D0563D1 /* ExploreView.swift in Sources */,
 				CD6D387AF35D4BDEE9693852 /* FindView.swift in Sources */,
 				C668412E830D38E1B763F8CA /* GeoMath.swift in Sources */,
+				661374E2DA37C044259631DA /* GestureLesson.swift in Sources */,
 				C5A2372754A8361943A5FD69 /* Glance.swift in Sources */,
 				FEAA581B15E5279728FC6D9A /* Haptics.swift in Sources */,
 				0713BC9DE0F081976C28781C /* HeadTracker.swift in Sources */,
