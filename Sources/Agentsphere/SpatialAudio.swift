@@ -15,6 +15,7 @@ final class SpatialAudio: AgentAudio {
     /// Each agent speaks one line at a time; a new line waits for the previous one.
     private var speechTail: [UUID: Task<Void, Never>] = [:]
     let voices: VoiceRouter
+    private var restartWork: DispatchWorkItem?
 
     /// Called on the main queue when agents start or stop talking (any agent).
     var onSpeakingChanged: ((Bool) -> Void)?
@@ -40,11 +41,18 @@ final class SpatialAudio: AgentAudio {
         environment.reverbParameters.enable = false
         startEngine()
         // macOS stops the engine when the output device changes; bring the agents' voices back.
+        // These arrive in bursts; restart once, and only if the engine actually stopped.
         NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
             guard let self else { return }
-            print("Agentsphere: audio output changed; restarting engine")
-            self.startEngine()
-            for p in self.players.values { p.play() }
+            self.restartWork?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, !self.engine.isRunning else { return }
+                print("Agentsphere: audio output changed; restarting engine")
+                self.startEngine()
+                for p in self.players.values { p.play() }
+            }
+            self.restartWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
         }
     }
 
@@ -59,7 +67,8 @@ final class SpatialAudio: AgentAudio {
     func register(id: UUID, azimuth: Double, voiceIndex: Int) {
         guard players[id] == nil else { return }
         let player = AVAudioPlayerNode()
-        engine.stop()
+        // Hot-attach: the environment node accepts new inputs while running, so adding an
+        // agent doesn't stop the engine (a restart reloads HRTF data and stalls the UI).
         engine.attach(player)
         engine.connect(player, to: environment, format: format)
         player.renderingAlgorithm = .HRTFHQ
@@ -68,7 +77,7 @@ final class SpatialAudio: AgentAudio {
         azimuths[id] = azimuth
         self.voiceIndex[id] = voiceIndex
         startEngine()
-        for p in players.values { p.play() }
+        player.play()
         updatePositions()
     }
 

@@ -4,15 +4,22 @@ import CoreAudio
 import Foundation
 import Speech
 
-/// Push-to-talk: transcribes your voice on-device (when supported).
+/// Transcribes your voice on-device (when supported).
+///
+/// The mic input stays open between utterances while hands-free is on; only the
+/// recognition task starts and stops. Opening and closing the input reconfigures the
+/// audio hardware, which forces every output engine to restart and stalls the UI.
 final class SpeechInput {
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
-    /// Rebuilt for every listening session: AVAudioEngine caches the input format, and
+    /// Rebuilt whenever the input (re)opens: AVAudioEngine caches the input format, and
     /// after switching devices a stale format crashes installTap.
-    private var engine = AVAudioEngine()
-    private var request: SFSpeechAudioBufferRecognitionRequest?
+    private var engine: AVAudioEngine?
+    private var configObserver: NSObjectProtocol?
+    /// Read from the audio tap thread.
+    private var currentRequest: SFSpeechAudioBufferRecognitionRequest?
+    private let requestLock = NSLock()
     private var task: SFSpeechRecognitionTask?
-    private var tapInstalled = false
+    private var authorized = false
     private(set) var latest = ""
     /// Record from the Mac's built-in mic even if AirPods are the system input. An open
     /// AirPods mic drops them to call-quality audio, which ruins the spatial sound.
@@ -22,8 +29,12 @@ final class SpeechInput {
     /// Called on the main queue with the running transcript.
     var onPartial: ((String) -> Void)?
 
-    /// Asks for mic + speech permission, then starts listening. Completion gets an error message or nil.
+    /// Asks for mic + speech permission once, then starts a recognition. Completion gets an error message or nil.
     func begin(completion: @escaping (String?) -> Void) {
+        if authorized {
+            do { try startRecognition(); completion(nil) } catch { completion("Couldn't start listening: \(error.localizedDescription)") }
+            return
+        }
         AVCaptureDevice.requestAccess(for: .audio) { micOK in
             SFSpeechRecognizer.requestAuthorization { status in
                 DispatchQueue.main.async {
@@ -35,6 +46,7 @@ final class SpeechInput {
                         completion("Speech recognition not allowed. Allow it in System Settings › Privacy & Security › Speech Recognition.")
                         return
                     }
+                    self.authorized = true
                     do {
                         try self.startRecognition()
                         completion(nil)
@@ -46,19 +58,12 @@ final class SpeechInput {
         }
     }
 
-    private func startRecognition() throws {
-        cleanup()
-        latest = ""
-        guard let recognizer, recognizer.isAvailable else {
-            throw NSError(domain: "Agentsphere", code: 1, userInfo: [NSLocalizedDescriptionKey: "Speech recognizer unavailable"])
-        }
-        let req = SFSpeechAudioBufferRecognitionRequest()
-        req.shouldReportPartialResults = true
-        if recognizer.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
-        request = req
-
-        engine = AVAudioEngine()
-        let input = engine.inputNode
+    /// Opens the mic once and keeps it open; buffers go to whichever recognition is current.
+    private func ensureInput() throws {
+        if let engine, engine.isRunning { return }
+        shutdownInput()
+        let e = AVAudioEngine()
+        let input = e.inputNode
         if preferBuiltInMic, let unit = input.audioUnit, var mic = Self.builtInMic() {
             let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
                                               &mic, UInt32(MemoryLayout<AudioDeviceID>.size))
@@ -71,11 +76,33 @@ final class SpeechInput {
         guard fmt.sampleRate > 0, fmt.channelCount > 0 else {
             throw NSError(domain: "Agentsphere", code: 2, userInfo: [NSLocalizedDescriptionKey: "No usable microphone input (\(inputName))"])
         }
-        input.installTap(onBus: 0, bufferSize: 1024, format: fmt) { buffer, _ in req.append(buffer) }
-        tapInstalled = true
-        engine.prepare()
-        try engine.start()
+        input.installTap(onBus: 0, bufferSize: 1024, format: fmt) { [weak self] buffer, _ in
+            guard let self else { return }
+            let req = self.requestLock.withLock { self.currentRequest }
+            req?.append(buffer)
+        }
+        e.prepare()
+        try e.start()
+        engine = e
+        // If the input device changes underneath us, drop the engine; the next begin rebuilds it.
+        configObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: e, queue: .main) { [weak self] _ in
+            print("Agentsphere: mic input configuration changed; reopening on next listen")
+            self?.shutdownInput()
+        }
+        print("Agentsphere: mic open (\(inputName), \(Int(fmt.sampleRate)) Hz)")
+    }
 
+    private func startRecognition() throws {
+        endRecognition()
+        latest = ""
+        guard let recognizer, recognizer.isAvailable else {
+            throw NSError(domain: "Agentsphere", code: 1, userInfo: [NSLocalizedDescriptionKey: "Speech recognizer unavailable"])
+        }
+        try ensureInput()
+        let req = SFSpeechAudioBufferRecognitionRequest()
+        req.shouldReportPartialResults = true
+        if recognizer.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
+        requestLock.withLock { currentRequest = req }
         task = recognizer.recognitionTask(with: req) { [weak self] result, _ in
             guard let result else { return }
             let text = result.bestTranscription.formattedString
@@ -86,11 +113,38 @@ final class SpeechInput {
         }
     }
 
-    /// Stops listening and returns what was heard.
+    /// Stops the current recognition and returns what was heard. The mic stays open.
     func finish() -> String {
         let text = latest
-        cleanup()
+        endRecognition()
         return text
+    }
+
+    /// Closes the mic entirely (hands-free off, or after push-to-talk).
+    func shutdown() {
+        endRecognition()
+        shutdownInput()
+    }
+
+    private func endRecognition() {
+        let req = requestLock.withLock { () -> SFSpeechAudioBufferRecognitionRequest? in
+            let r = currentRequest
+            currentRequest = nil
+            return r
+        }
+        req?.endAudio()
+        task?.cancel()
+        task = nil
+    }
+
+    private func shutdownInput() {
+        if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
+        configObserver = nil
+        guard let e = engine else { return }
+        e.inputNode.removeTap(onBus: 0)
+        e.stop()
+        engine = nil
+        print("Agentsphere: mic closed")
     }
 
     /// The Mac's built-in microphone, if it has one.
@@ -116,15 +170,4 @@ final class SpeechInput {
         return nil
     }
 
-    private func cleanup() {
-        if engine.isRunning { engine.stop() }
-        if tapInstalled {
-            engine.inputNode.removeTap(onBus: 0)
-            tapInstalled = false
-        }
-        request?.endAudio()
-        task?.cancel()
-        request = nil
-        task = nil
-    }
 }

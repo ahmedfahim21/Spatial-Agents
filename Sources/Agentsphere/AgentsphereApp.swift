@@ -6,6 +6,8 @@ struct AgentsphereApp: App {
     @StateObject private var state = AppState()
 
     init() {
+        // Line-buffer stdout so log lines show up immediately when redirected to a file.
+        setvbuf(stdout, nil, _IOLBF, 0)
         NSApplication.shared.setActivationPolicy(.regular)
         DispatchQueue.main.async { NSApp.activate(ignoringOtherApps: true) }
     }

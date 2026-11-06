@@ -11,7 +11,11 @@ final class AppState: ObservableObject {
     @Published var headStatus = "Starting head tracking…"
     @Published var isListening = false
     /// Listen automatically when you face an agent; no button needed.
-    @Published var handsFree = true { didSet { handsFree ? scheduleHandsFree() : stopListening() } }
+    @Published var handsFree = true {
+        didSet {
+            if handsFree { scheduleHandsFree() } else { stopListening(); speech.shutdown() }
+        }
+    }
     /// A heard instruction waiting out its short cancel window.
     @Published var pendingSend: PendingSend?
     @Published var micName = ""
@@ -443,6 +447,7 @@ final class AppState: ObservableObject {
         if isListening {
             isListening = false
             let text = speech.finish().trimmingCharacters(in: .whitespacesAndNewlines)
+            if !handsFree { speech.shutdown() }
             transcript = ""
             if !text.isEmpty { send(text) }
         } else {

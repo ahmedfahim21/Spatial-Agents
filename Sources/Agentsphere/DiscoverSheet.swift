@@ -88,9 +88,10 @@ struct SessionRow: View {
             if state.isAttached(session) {
                 Text("In the room").font(.caption).foregroundStyle(.secondary)
             } else {
-                Button("Attach") { state.attach(session) }
+                // Deferred: changing the room while the list is mid-update re-enters NSTableView.
+                Button("Attach") { DispatchQueue.main.async { state.attach(session) } }
                     .help(session.isLive ? "Continue this conversation (forked, since it's open elsewhere)" : "Continue this conversation")
-                Button("New here") { state.attach(session, fresh: true) }
+                Button("New here") { DispatchQueue.main.async { state.attach(session, fresh: true) } }
                     .help("Start a fresh session in \(session.folderName)")
             }
         }

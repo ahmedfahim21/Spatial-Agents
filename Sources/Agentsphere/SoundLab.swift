@@ -177,6 +177,7 @@ final class SoundLab: ObservableObject {
     private var orbitTimer: Timer?
     private var lastOrbitTick = Date()
     private var started = false
+    private var restartWork: DispatchWorkItem?
     private let synth = AVSpeechSynthesizer()
 
     init() {
@@ -213,7 +214,15 @@ final class SoundLab: ObservableObject {
         // macOS stops the engine whenever the output changes (AirPods reconnect, Spatial Audio
         // toggled, mic switching AirPods to call mode). Restart it or the lab goes silent.
         NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
-            self?.recover(reason: "Audio output changed")
+            guard let self else { return }
+            // Coalesce bursts; only restart if the engine really stopped.
+            self.restartWork?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, !self.usePhase, !self.engine.isRunning else { return }
+                self.recover(reason: "Audio output changed")
+            }
+            self.restartWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
         }
     }
 
