@@ -16,6 +16,7 @@ struct EditAgentView: View {
     @State private var context: String
     @State private var radius: Double
     @State private var model: String
+    @State private var privateInference: Bool
     @State private var tools: Set<AgentTool>
     /// Where it lives; nil = move it to where you are now.
     @State private var place: CLLocationCoordinate2D?
@@ -37,7 +38,8 @@ struct EditAgentView: View {
         _greeting = State(initialValue: agent.greeting)
         _context = State(initialValue: agent.context ?? "")
         _radius = State(initialValue: agent.radiusM)
-        _model = State(initialValue: agent.model ?? ZGModel.defaultId)
+        _model = State(initialValue: agent.model ?? (agent.privateInference == true ? ZGModel.privateDefaultId : ZGModel.defaultId))
+        _privateInference = State(initialValue: agent.privateInference == true)
         _tools = State(initialValue: ToolAccess.tools(for: agent.id))
         _place = State(initialValue: agent.coordinate)
         _acceptsPayments = State(initialValue: agent.pricing == "paid")
@@ -58,7 +60,8 @@ struct EditAgentView: View {
                         ForEach(VoicePalette.voices, id: \.id) { Text($0.name).tag($0.id) }
                     }
                     .pickerStyle(.navigationLink)
-                    ModelRow(model: $model)
+                    ModelRow(model: $model, privateOnly: privateInference)
+                    PrivateInferenceRow(isOn: $privateInference, model: $model)
                 }
 
                 Section("Colour and shape") {
@@ -153,7 +156,8 @@ struct EditAgentView: View {
             lat: agent.isGeo ? spot?.latitude : nil,
             lng: agent.isGeo ? spot?.longitude : nil,
             radiusM: radius,
-            model: model != (agent.model ?? ZGModel.defaultId) ? model : nil
+            model: model != (agent.model ?? ZGModel.defaultId) ? model : nil,
+            privateInference: privateInference != (agent.privateInference == true) ? privateInference : nil
         )
         // Payments: the menu as edited, empty to stop selling, or untouched if not loaded.
         let newMenu: [CatalogItem]? = sells && menuLoaded ? (acceptsPayments ? menu : []) : nil

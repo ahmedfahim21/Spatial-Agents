@@ -33,6 +33,8 @@ struct Agent: Identifiable, Codable, Hashable {
     var verified: Bool?
     /// The 0G router chat model it thinks with (nil = the server default).
     var model: String?
+    /// Runs on 0G's private tier: sealed inference in a TEE, on TeeML models only.
+    var privateInference: Bool?
 
     var isGeo: Bool { anchor == .geo || (anchor == nil && lat != nil) }
     var isPublic: Bool { visibility == .public }
@@ -59,6 +61,8 @@ struct NewAgent: Encodable {
     var walletAddress: String?
     /// Nil = the server default.
     var model: String?
+    /// Nil = off.
+    var privateInference: Bool?
 }
 
 /// Voices agents can pick from: ElevenLabs premade voices (via the server), with a matching
