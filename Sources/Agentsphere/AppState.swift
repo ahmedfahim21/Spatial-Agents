@@ -46,6 +46,9 @@ final class AppState: ObservableObject {
     @Published var gestureSensitivity: Double = 1 { didSet { tracker.sensitivity = gestureSensitivity } }
     @Published var focusWidth: Double = 30
     @Published var invertHead = false { didSet { tracker.invert = invertHead } }
+    /// Agents come with you when you turn or walk away (vs. staying fixed in the room).
+    @Published var followMe = true { didSet { tracker.followMe = followMe } }
+    @Published var followState = ""
 
     let voices = VoiceRouter()
     private(set) var audio: AgentAudio
@@ -65,6 +68,12 @@ final class AppState: ObservableObject {
         tracker.onYaw = { [weak self] yaw in self?.handleYaw(yaw) }
         tracker.onStatus = { [weak self] s in DispatchQueue.main.async { self?.headStatus = s } }
         tracker.onPitch = { [weak self] p in self?.head.pitch = p }
+        tracker.onFollowState = { [weak self] s in self?.followState = s }
+        // Never re-center the ring under someone you're talking to or answering.
+        tracker.isEngaged = { [weak self] in
+            guard let self else { return false }
+            return self.utteranceTarget != nil || self.pendingSend != nil || !self.pending.isEmpty || self.agentsSpeaking
+        }
         tracker.onGesture = { [weak self] g in self?.handleGesture(g) }
         speech.onPartial = { [weak self] t in self?.heard(t) }
         server.onRequest = { [weak self] r in self?.handlePermission(r) }

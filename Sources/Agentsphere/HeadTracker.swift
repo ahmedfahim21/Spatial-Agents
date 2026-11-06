@@ -23,7 +23,18 @@ final class HeadTracker {
     var onPitch: ((Double) -> Void)?
     var onGesture: ((HeadGesture) -> Void)?
     var onStatus: ((String) -> Void)?
-    var invert = false
+    /// "walking", "re-centering" or "" — for the UI.
+    var onFollowState: ((String) -> Void)?
+    var invert = false { didSet { follower.reset() } }
+    /// Agents travel with you (body-relative) instead of staying fixed in the room.
+    var followMe: Bool {
+        get { follower.enabled }
+        set { follower.enabled = newValue; follower.reset() }
+    }
+    /// While true (talking to an agent, a permission waiting) the ring never re-centers.
+    var isEngaged: () -> Bool = { false }
+    private let follower = BodyFollower()
+    private var lastFollowState = ""
     /// 0.5 (stiff) ... 2 (twitchy). Scales the speed and size a nod or shake needs.
     var sensitivity: Double {
         get { gestures.sensitivity }
@@ -66,7 +77,14 @@ final class HeadTracker {
             self.unwrappedYaw = unwrapped
             let smoothYaw = self.yawFilter.filter(unwrapped, time: m.timestamp)
             let smoothPitch = self.pitchFilter.filter(pitch, time: m.timestamp)
-            self.onYaw?(normalizeAngle(smoothYaw))
+            // Head direction relative to your body, so agents come with you when you turn or walk.
+            let relative = self.follower.update(head: smoothYaw, time: m.timestamp,
+                                                acceleration: m.userAcceleration, gravity: m.gravity, engaged: self.isEngaged())
+            if self.follower.state != self.lastFollowState {
+                self.lastFollowState = self.follower.state
+                self.onFollowState?(self.follower.state)
+            }
+            self.onYaw?(relative)
             self.onPitch?(smoothPitch)
         }
         onStatus?("Waiting for AirPods motion…")
@@ -77,9 +95,105 @@ final class HeadTracker {
         zeroYaw = lastRawYaw
         unwrappedYaw = nil
         yawFilter.reset()
+        follower.reset()
     }
 
     func stop() { manager.stopDeviceMotionUpdates() }
+}
+
+/// Estimates which way your body faces from head motion alone (AirPods can't see your body),
+/// so the ring of agents can follow you:
+/// - walking (step rhythm in the accelerometer): body follows the head within ~1 s;
+/// - head held far (>45°) from the front for 6 s: you've turned, so re-center over ~1.5 s;
+/// - otherwise a very slow pull (2 min) that also cancels compass drift.
+/// Short glances never move it, and nothing moves while you're engaged with an agent.
+final class BodyFollower {
+    var enabled = true
+    private(set) var state = ""
+    private var bodyYaw: Double?
+    private var lastTime: Double?
+    private var offSince: Double?
+    private var recentering = false
+    private let walk = WalkDetector()
+
+    func reset() {
+        bodyYaw = nil
+        offSince = nil
+        recentering = false
+    }
+
+    /// `head` is unwrapped (continuous) yaw in degrees. Returns head yaw relative to the body.
+    func update(head: Double, time: Double, acceleration a: CMAcceleration, gravity g: CMAcceleration, engaged: Bool) -> Double {
+        let walking = walk.feed(time: time, acceleration: a, gravity: g)
+        defer { lastTime = time }
+        guard var body = bodyYaw, let last = lastTime else {
+            bodyYaw = head
+            return 0
+        }
+        let dt = min(max(time - last, 0), 0.2)
+        let off = head - body
+
+        if !enabled {
+            state = ""
+        } else if engaged {
+            offSince = nil
+            recentering = false
+            state = ""
+        } else if walking {
+            body += off * min(1, dt / 0.8)
+            recentering = false
+            offSince = nil
+            state = "walking"
+        } else {
+            if abs(off) > 45 {
+                if offSince == nil { offSince = time }
+                if let since = offSince, time - since > 6 { recentering = true }
+            } else if !recentering {
+                offSince = nil
+            }
+            if recentering {
+                body += off * min(1, dt / 0.5)
+                if abs(off) < 3 { recentering = false; offSince = nil }
+                state = "re-centering"
+            } else {
+                body += off * dt / 120
+                state = ""
+            }
+        }
+        bodyYaw = body
+        return normalizeAngle(head - body)
+    }
+}
+
+/// Detects walking from the AirPods accelerometer: sustained (≥2 s) vertical bounce (each
+/// step lifts and drops the head) well above what nods, shakes or fidgeting produce.
+final class WalkDetector {
+    private var samples: [(t: Double, m: Double)] = []
+    private var activeSince: Double?
+    private var quietSince: Double?
+    private(set) var walking = false
+
+    func feed(time: Double, acceleration a: CMAcceleration, gravity g: CMAcceleration) -> Bool {
+        // Vertical component (signed), so the up-down step rhythm survives whatever the head's tilt.
+        let gn = max((g.x * g.x + g.y * g.y + g.z * g.z).squareRoot(), 0.01)
+        let m = (a.x * g.x + a.y * g.y + a.z * g.z) / gn
+        samples.append((time, m))
+        samples.removeAll { time - $0.t > 2 }
+        guard samples.count > 10 else { return walking }
+        let mean = samples.map(\.m).reduce(0, +) / Double(samples.count)
+        let sd = (samples.map { ($0.m - mean) * ($0.m - mean) }.reduce(0, +) / Double(samples.count)).squareRoot()
+
+        if sd > 0.06 {
+            quietSince = nil
+            if activeSince == nil { activeSince = time }
+            if let s = activeSince, time - s >= 2 { walking = true }
+        } else if sd < 0.03 {
+            activeSince = nil
+            if quietSince == nil { quietSince = time }
+            if let q = quietSince, time - q >= 1.5 { walking = false }
+        }
+        return walking
+    }
 }
 
 /// One Euro filter: heavy smoothing when the head is still (kills jitter),

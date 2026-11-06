@@ -231,6 +231,15 @@ struct ControlPanel: View {
                             .keyboardShortcut("r", modifiers: .option)
                         Toggle("Invert direction", isOn: $state.invertHead)
                     }
+                    Picker("Agents", selection: $state.followMe) {
+                        Text("Follow me").tag(true)
+                        Text("Fixed in room").tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                    Text(state.followMe
+                         ? (state.followState.isEmpty ? "Turn or walk away and the agents come with you." : "● \(state.followState.capitalized)")
+                         : "Agents stay where they are in the room.")
+                        .font(.caption).foregroundStyle(state.followState.isEmpty ? Color.secondary : Color.accentColor)
                     HStack {
                         Spacer()
                         Text("Last gesture: \(state.lastGesture)").bold()
