@@ -35,8 +35,12 @@ final class MobileState {
 
     private(set) var focusedId: UUID?
     /// Head direction: yaw relative to your body (+ = right) and raw pitch, degrees.
+    /// Rounded to whole degrees and written only when they change, so screens redraw as fast
+    /// as you actually turn rather than at the sensor rate. Audio and focus use the exact values.
     private(set) var headYaw: Double = 0
     private(set) var headPitchRaw: Double = 0
+    /// Where your head points in the world, degrees from true north (rounded, for views).
+    private(set) var headWorld: Double?
     /// Agents whose conversation just ended (eyes closed) or failed (worried).
     private(set) var asleep: Set<UUID> = []
     private(set) var failing: Set<UUID> = []
@@ -74,18 +78,28 @@ final class MobileState {
     // MARK: Head frames
 
     /// Head yaw relative to your body (body agents).
-    private var yawBody: Double = 0
+    @ObservationIgnored private var yawBody: Double = 0
     /// Head yaw in the tracker's fixed frame.
-    private var yawFixed: Double = 0
+    @ObservationIgnored private var yawFixed: Double = 0
+    /// Head pitch, degrees (+ = up).
+    @ObservationIgnored private var pitchRaw: Double = 0
     /// Compass heading of the tracker's fixed-frame zero; nil until calibrated.
-    private var worldOffset: Double?
+    @ObservationIgnored private var worldOffset: Double?
     @ObservationIgnored private var lastHeadAt = Date.distantPast
     @ObservationIgnored private var lastYawLog = Date.distantPast
 
-    /// Where your head points in the world, degrees from true north.
-    var headWorld: Double? {
+    /// Exact head direction in the world.
+    private var exactWorld: Double? {
         if hasHeadData, let o = worldOffset { return normalize360(o + yawFixed) }
         return location.heading   // no AirPods: the phone is the pointer
+    }
+
+    /// Hands the current pose to views, only where it changed by a degree or more.
+    private func publishPose() {
+        let yaw = yawBody.rounded(), pitch = pitchRaw.rounded(), world = exactWorld?.rounded()
+        if yaw != headYaw { headYaw = yaw }
+        if pitch != headPitchRaw { headPitchRaw = pitch }
+        if world != headWorld { headWorld = world }
     }
 
     // MARK: Placement
@@ -134,7 +148,6 @@ final class MobileState {
         tracker.onYaw = { [weak self] y in
             guard let self else { return }
             self.yawBody = y
-            self.headYaw = y
             self.lastHeadAt = Date()
             if !self.hasHeadData {
                 self.hasHeadData = true
@@ -142,12 +155,12 @@ final class MobileState {
             }
             if Date().timeIntervalSince(self.lastYawLog) > 2 {
                 self.lastYawLog = Date()
-                print(String(format: "Agentsphere: head yaw %.0f° (fixed %.0f°) pitch %.0f°", y, self.yawFixed, self.headPitchRaw))
+                print(String(format: "Agentsphere: head yaw %.0f° (fixed %.0f°) pitch %.0f°", y, self.yawFixed, self.pitchRaw))
             }
             self.updateScene()
         }
         tracker.onFixedYaw = { [weak self] y in self?.yawFixed = y }
-        tracker.onPitch = { [weak self] p in self?.headPitchRaw = p }
+        tracker.onPitch = { [weak self] p in self?.pitchRaw = p }
         tracker.onGesture = { [weak self] g in self?.handleGesture(g) }
         tracker.isEngaged = { [weak self] in
             guard let self else { return false }
@@ -158,6 +171,9 @@ final class MobileState {
         audio.beforeSpeaking = { [weak self] in self?.releaseMicForSpeech() ?? false }
 
         location.onMove = { [weak self] in self?.locationChanged() }
+        NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshRoute() }
+        }
         location.onHeading = { [weak self] in self?.calibrateWorld(); self?.updateScene() }
 
         let t = Timer(timeInterval: 0.1, repeats: true) { [weak self] _ in
@@ -368,7 +384,7 @@ final class MobileState {
         guard hasHeadData, let h = location.heading, location.headingAccuracy < 30 else { return }
         let target = normalize360(h - yawFixed)
         guard let current = worldOffset else { worldOffset = target; return }
-        let lookingAtPhone = headPitchRaw < -12
+        let lookingAtPhone = pitchRaw < -12
         let alpha = lookingAtPhone ? 0.08 : 0.005   // slow drift correction otherwise
         worldOffset = normalize360(current + normalizeAngle(target - current) * alpha)
     }
@@ -441,7 +457,7 @@ final class MobileState {
     /// "This is forward": the current head direction becomes the front of your space.
     func calibrateForward() {
         tracker.recenter()
-        pitchZero = headPitchRaw
+        pitchZero = pitchRaw
         UserDefaults.standard.set(pitchZero, forKey: "pitchZero")
         worldOffset = nil
         calibrateWorld()
@@ -462,16 +478,25 @@ final class MobileState {
     }
 
     /// Angle of an agent relative to where your head points (0 = straight ahead, + = right).
-    func relativeAngle(_ id: UUID) -> Double? {
-        if let zone = bodySlots[id], withMe { return normalizeAngle(zone.azimuth - yawBody) }
-        guard let a = agent(id), a.isGeo, let b = bearing(to: a), let h = headWorld else { return nil }
-        return normalizeAngle(b - h)
+    /// For views: the agent's direction from the published (whole-degree) pose.
+    func relativeAngle(_ id: UUID) -> Double? { angle(id, yaw: headYaw, world: headWorld) }
+
+    /// For views: the agent's height relative to your gaze (body agents only).
+    func relativeElevation(_ id: UUID) -> Double? { elevation(id, pitch: headPitch) }
+
+    /// For audio and focus: the exact pose.
+    private func exactAngle(_ id: UUID) -> Double? { angle(id, yaw: yawBody, world: exactWorld) }
+    private func exactElevation(_ id: UUID) -> Double? { elevation(id, pitch: pitchRaw - pitchZero) }
+
+    private func angle(_ id: UUID, yaw: Double, world: Double?) -> Double? {
+        if let zone = bodySlots[id], withMe { return normalizeAngle(zone.azimuth - yaw) }
+        guard let a = agent(id), a.isGeo, let b = bearing(to: a), let world else { return nil }
+        return normalizeAngle(b - world)
     }
 
-    /// Height of an agent relative to where your head points (body agents only).
-    func relativeElevation(_ id: UUID) -> Double? {
+    private func elevation(_ id: UUID, pitch: Double) -> Double? {
         guard let zone = bodySlots[id], withMe else { return nil }
-        return zone.elevation - headPitch
+        return zone.elevation - pitch
     }
 
     /// Agents you can look at and wake right now.
@@ -481,10 +506,11 @@ final class MobileState {
 
     private func updateScene() {
         for id in placed {
-            guard let rel = relativeAngle(id) else { continue }
-            audio.setDirection(id: id, azimuth: rel, elevation: relativeElevation(id) ?? 0)
+            guard let rel = exactAngle(id) else { continue }
+            audio.setDirection(id: id, azimuth: rel, elevation: exactElevation(id) ?? 0)
         }
         updateFocus()
+        publishPose()
     }
 
     private func updateFocus() {
@@ -496,8 +522,8 @@ final class MobileState {
         let pool = (lookingEnabled ? talkable : talkable.filter { $0.id == activeId })
             .filter { hasHeadData || $0.isGeo }
         let candidates = pool.compactMap { a -> (UUID, Double)? in
-            guard let az = relativeAngle(a.id) else { return nil }
-            guard let el = relativeElevation(a.id) else { return (a.id, abs(az)) }
+            guard let az = exactAngle(a.id) else { return nil }
+            guard let el = exactElevation(a.id) else { return (a.id, abs(az)) }
             return (a.id, (az * az + el * el * 1.2).squareRoot())
         }
         var next: UUID?
@@ -507,7 +533,7 @@ final class MobileState {
             next = best.0
         }
         if next != focusedId {
-            print("Agentsphere: focus → \(agent(next)?.name ?? "nobody") (yaw \(Int(yawBody))°, pitch \(Int(headPitch))°)")
+            print("Agentsphere: focus → \(agent(next)?.name ?? "nobody") (yaw \(Int(yawBody))°, pitch \(Int(pitchRaw - pitchZero))°)")
             if let cur = focusedId {
                 previousFocus = (cur, Date().timeIntervalSince(lastFocusAt), Date())
             }
@@ -540,7 +566,7 @@ final class MobileState {
             lastThinkingPulse = Date()
             audio.cue(.thinking, from: active)
         }
-        let looking = relativeAngle(active).map { abs($0) < 50 } ?? true
+        let looking = exactAngle(active).map { abs($0) < 50 } ?? true
         if looking { lookAwaySince = nil } else if lookAwaySince == nil { lookAwaySince = Date() }
         let idle = phase == .listening && transcript.isEmpty
         if idle, let since = lookAwaySince, Date().timeIntervalSince(since) > 5 { endConversation(); return }
@@ -751,10 +777,9 @@ final class MobileState {
         calibrateWorld()
     }
 
-    /// Short name of where sound is going ("AirPods Pro").
-    var routeName: String {
-        AVAudioSession.sharedInstance().currentRoute.outputs.first?.portName ?? "Headphones"
-    }
+    /// Short name of where sound is going ("AirPods Pro"). Cached: asking the audio session
+    /// is too slow to do on every redraw.
+    private(set) var routeName = "Headphones"
 
     /// Back to listening after a pause (the mic button in a conversation).
     func resumeListening() {
@@ -765,6 +790,7 @@ final class MobileState {
     func refreshRoute() {
         route = AudioSession.routeDescription
         highQualityMic = AudioSession.highQualityMic
+        routeName = AVAudioSession.sharedInstance().currentRoute.outputs.first?.portName ?? "Headphones"
     }
 
     /// Demo mode: walk 10 m toward the Find target without moving.

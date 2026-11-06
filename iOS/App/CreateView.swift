@@ -100,7 +100,13 @@ struct CreateView: View {
                         .focused($field, equals: .context)
                 } header: { Text("Context") } footer: { Text("Only you see this. People who talk to it never do.") }
 
-                if flavor.needsPlace { placeSection }
+                // Its own view: it follows GPS, and the rest of the form shouldn't redraw with it.
+                if flavor.needsPlace {
+                    PlaceSection(radius: $radius, place: $place, color: color, shape: shape) {
+                        field = nil
+                        picking = true
+                    }
+                }
 
                 if flavor == .publicPlace {
                     Section {
@@ -163,42 +169,6 @@ struct CreateView: View {
         .padding(.vertical, 4)
     }
 
-    private var placeSection: some View {
-        Section {
-            if let c = spot {
-                PlacePreview(coordinate: c, radius: radius, color: color, shape: shape)
-                    .listRowInsets(EdgeInsets())
-            }
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("Arrive within")
-                    Spacer()
-                    Text("\(Int(radius)) m").foregroundStyle(.secondary).monospacedDigit()
-                }
-                Slider(value: $radius, in: 5...150, step: 5)
-            }
-            HStack {
-                Text(place == nil ? "Pinned here" : "Chosen on the map")
-                Spacer()
-                if place != nil {
-                    Button("Use my spot") { withAnimation(Motion.snappy) { place = nil } }
-                        .buttonStyle(.borderless)
-                } else if state.location.coordinate != nil {
-                    Text("±\(Int(state.location.accuracy)) m").foregroundStyle(.secondary).monospacedDigit()
-                } else {
-                    Text("Finding you…").foregroundStyle(.secondary)
-                }
-            }
-            Button { field = nil; picking = true } label: {
-                Label("Choose on map", systemImage: "map")
-            }
-        } header: { Text("Place") } footer: {
-            if place == nil, state.location.isPoorFix {
-                Text("GPS is rough here. Choosing on the map is more precise.")
-            }
-        }
-    }
-
     @ViewBuilder private func resultView(_ result: Result<String, Error>) -> some View {
         switch result {
         case .success(let text):
@@ -219,7 +189,8 @@ struct CreateView: View {
     private var spot: CLLocationCoordinate2D? { place ?? state.location.coordinate }
 
     private var canSave: Bool {
-        !name.trimmingCharacters(in: .whitespaces).isEmpty && !saving && (!state.createFlavor.needsPlace || spot != nil)
+        !name.trimmingCharacters(in: .whitespaces).isEmpty && !saving
+            && (!state.createFlavor.needsPlace || place != nil || state.location.hasFix)
     }
 
     private func save() {
@@ -256,6 +227,52 @@ struct CreateView: View {
                 withAnimation(Motion.snappy) { result = .failure(error) }
             }
             saving = false
+        }
+    }
+}
+
+/// Where a placed agent will live: a live preview, the arrival radius, and the map picker.
+private struct PlaceSection: View {
+    @Environment(MobileState.self) private var state
+    @Binding var radius: Double
+    @Binding var place: CLLocationCoordinate2D?
+    let color: BotColor
+    let shape: BotShape
+    let chooseOnMap: () -> Void
+
+    var body: some View {
+        Section {
+            if let c = place ?? state.location.coordinate {
+                PlacePreview(coordinate: c, radius: radius, color: color, shape: shape)
+                    .listRowInsets(EdgeInsets())
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Arrive within")
+                    Spacer()
+                    Text("\(Int(radius)) m").foregroundStyle(.secondary).monospacedDigit()
+                }
+                Slider(value: $radius, in: 5...150, step: 5)
+            }
+            HStack {
+                Text(place == nil ? "Pinned here" : "Chosen on the map")
+                Spacer()
+                if place != nil {
+                    Button("Use my spot") { withAnimation(Motion.snappy) { place = nil } }
+                        .buttonStyle(.borderless)
+                } else if state.location.coordinate != nil {
+                    Text("±\(Int(state.location.accuracy)) m").foregroundStyle(.secondary).monospacedDigit()
+                } else {
+                    Text("Finding you…").foregroundStyle(.secondary)
+                }
+            }
+            Button(action: chooseOnMap) {
+                Label("Choose on map", systemImage: "map")
+            }
+        } header: { Text("Place") } footer: {
+            if place == nil, state.location.isPoorFix {
+                Text("GPS is rough here. Choosing on the map is more precise.")
+            }
         }
     }
 }

@@ -161,27 +161,32 @@ final class SpatialAudio: AgentAudio {
 
     func setAzimuth(id: UUID, azimuth: Double) {
         azimuths[id] = azimuth
-        updatePositions()
+        updatePosition(id)
     }
 
     /// Direction with height: elevation in degrees, + = above ear level.
     func setDirection(id: UUID, azimuth: Double, elevation: Double) {
         azimuths[id] = azimuth
         elevations[id] = elevation
-        updatePositions()
+        updatePosition(id)
     }
 
     private func updatePositions() {
-        for (id, az) in azimuths {
-            let rel = (az - headYaw) * .pi / 180
-            let el = (elevations[id] ?? 0) * .pi / 180
-            // Listener faces -Z; +X is to the right; +Y is up.
-            players[id]?.position = AVAudio3DPoint(
-                x: Float(sin(rel) * cos(el)) * radius,
-                y: Float(sin(el)) * radius,
-                z: -Float(cos(rel) * cos(el)) * radius
-            )
-        }
+        for id in azimuths.keys { updatePosition(id) }
+    }
+
+    /// Moves one agent's source. Called per agent at the head-tracking rate, so it only
+    /// touches that agent's node.
+    private func updatePosition(_ id: UUID) {
+        guard let az = azimuths[id], let player = players[id] else { return }
+        let rel = (az - headYaw) * .pi / 180
+        let el = (elevations[id] ?? 0) * .pi / 180
+        // Listener faces -Z; +X is to the right; +Y is up.
+        player.position = AVAudio3DPoint(
+            x: Float(sin(rel) * cos(el)) * radius,
+            y: Float(sin(el)) * radius,
+            z: -Float(cos(rel) * cos(el)) * radius
+        )
     }
 
     // MARK: - Sound

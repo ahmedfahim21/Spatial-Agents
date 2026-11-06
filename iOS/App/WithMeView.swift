@@ -13,9 +13,11 @@ struct WithMeView: View {
                         EmptyWithMe()
                     } else {
                         if !state.calibrated { setupPrompt }
+                        // Radar and caption follow your head; they're their own views so
+                        // the rest of the screen doesn't redraw as you turn.
                         VStack(spacing: 18) {
                             Radar()
-                            caption
+                            Caption()
                         }
                         agentList
                         Button("Arrange your space") { arranging = true }
@@ -60,29 +62,6 @@ struct WithMeView: View {
         .buttonStyle(PressableStyle())
     }
 
-    private var caption: some View {
-        let focused = state.agent(state.focusedId)
-        let active = state.agent(state.activeId)
-        let title: String = {
-            if let active { return "Talking to \(active.name)" }
-            if let focused { return "Nod to talk to \(focused.name)" }
-            if state.hasHeadData { return "Look at an agent, then nod" }
-            return "Put in your AirPods to look around"
-        }()
-        return VStack(spacing: 4) {
-            Text(title)
-                .font(.headline)
-                .contentTransition(.opacity)
-            Text(state.hasHeadData ? "Facing \(Int(normalize360(state.headYaw)))° · AirPods head tracking"
-                                   : "They'll sit around your head. Turn to one and nod to talk.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .multilineTextAlignment(.center)
-        }
-        .animation(Motion.snappy, value: title)
-    }
-
     private var agentList: some View {
         VStack(spacing: 0) {
             ForEach(Array(state.bodyAgents.enumerated()), id: \.element.id) { i, agent in
@@ -108,6 +87,34 @@ struct WithMeView: View {
             }
         }
         .card()
+    }
+}
+
+/// What's happening around you, in a line, plus where you're facing.
+private struct Caption: View {
+    @Environment(MobileState.self) private var state
+
+    var body: some View {
+        let focused = state.agent(state.focusedId)
+        let active = state.agent(state.activeId)
+        let title: String = {
+            if let active { return "Talking to \(active.name)" }
+            if let focused { return "Nod to talk to \(focused.name)" }
+            if state.hasHeadData { return "Look at an agent, then nod" }
+            return "Put in your AirPods to look around"
+        }()
+        return VStack(spacing: 4) {
+            Text(title)
+                .font(.headline)
+                .contentTransition(.opacity)
+            Text(state.hasHeadData ? "Facing \(Int(normalize360(state.headYaw)))° · AirPods head tracking"
+                                   : "They'll sit around your head. Turn to one and nod to talk.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .multilineTextAlignment(.center)
+        }
+        .animation(Motion.snappy, value: title)
     }
 }
 

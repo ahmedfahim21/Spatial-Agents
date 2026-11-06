@@ -110,6 +110,34 @@ private struct FindingStage: View {
     }
 }
 
+/// The agent and its focus ring. Its eyes follow your head, so it redraws as you turn;
+/// kept apart from the rest of the screen, which doesn't.
+private struct ArrivedBot: View {
+    @Environment(MobileState.self) private var state
+    let agent: Agent
+    let focused: Bool
+
+    var body: some View {
+        ZStack {
+            FocusRing(active: focused, diameter: 212)
+            BotView(agent: agent, mood: state.mood(for: agent), size: 160, look: state.look(for: agent))
+        }
+    }
+}
+
+private struct VoiceDirection: View {
+    @Environment(MobileState.self) private var state
+    let agent: Agent
+
+    var body: some View {
+        if let relative = state.relativeAngle(agent.id) {
+            Text("Its voice is \(Words.voiceDirection(relative)) · \(state.routeName)")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
 /// The precision-finding dial: a ring of dots that brightens toward the agent, and the arrow.
 private struct Dial: View {
     /// Degrees clockwise from straight up; nil hides the arrow.
@@ -174,7 +202,6 @@ private struct ArrivedStage: View {
 
     var body: some View {
         let focused = state.focusedId == agent.id
-        let relative = state.relativeAngle(agent.id)
         VStack(spacing: 0) {
             ZStack {
                 Text("Arrived").font(.headline).foregroundStyle(.secondary)
@@ -188,10 +215,7 @@ private struct ArrivedStage: View {
             .padding(.top, 12)
 
             Spacer()
-            ZStack {
-                FocusRing(active: focused, diameter: 212)
-                BotView(agent: agent, mood: state.mood(for: agent), size: 160, look: state.look(for: agent))
-            }
+            ArrivedBot(agent: agent, focused: focused)
             VStack(spacing: 6) {
                 Text(agent.name)
                     .font(.system(size: 28, weight: .bold))
@@ -216,11 +240,7 @@ private struct ArrivedStage: View {
             Spacer()
 
             VStack(spacing: 14) {
-                if let relative, state.hasHeadData {
-                    Text("Its voice is \(Words.voiceDirection(relative)) · \(state.routeName)")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
+                if state.hasHeadData { VoiceDirection(agent: agent) }
                 if state.hasHeadData {
                     Button { state.wake(agent) } label: { Label("Talk instead", systemImage: "mic.fill") }
                         .buttonStyle(SecondaryButtonStyle())

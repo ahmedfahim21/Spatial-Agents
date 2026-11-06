@@ -97,27 +97,46 @@ private struct YouDot: View {
 }
 
 /// A small, non-interactive map showing where an agent will be and how far it reaches.
+/// GPS wobbles by a metre or two every second; the map only follows real moves.
 struct PlacePreview: View {
     let coordinate: CLLocationCoordinate2D
     let radius: Double
     let color: BotColor
     let shape: BotShape
 
+    @State private var shown: CLLocationCoordinate2D?
+    @State private var camera: MapCameraPosition = .automatic
+
     var body: some View {
-        Map(position: .constant(.region(MKCoordinateRegion(center: coordinate,
-                                                           latitudinalMeters: max(160, radius * 5),
-                                                           longitudinalMeters: max(160, radius * 5)))),
-            interactionModes: []) {
-            MapCircle(center: coordinate, radius: radius)
+        let c = shown ?? coordinate
+        Map(position: $camera, interactionModes: []) {
+            MapCircle(center: c, radius: radius)
                 .foregroundStyle(color.color.opacity(0.2))
                 .stroke(color.color, lineWidth: 1.5)
-            Annotation("", coordinate: coordinate) {
+            Annotation("", coordinate: c) {
                 BotView(color: color, shape: shape, size: 30).shadow(color: .black.opacity(0.15), radius: 3, y: 1)
             }
         }
         .mapStyle(.standard(pointsOfInterest: .excludingAll))
         .frame(height: 150)
         .allowsHitTesting(false)
+        .onAppear { follow(coordinate, animated: false) }
+        .onChange(of: GeoMath.distance(shown ?? coordinate, coordinate) > 4) { _, moved in
+            if moved { follow(coordinate, animated: true) }
+        }
+        .onChange(of: radius) { _, _ in frame(animated: true) }
+    }
+
+    private func follow(_ c: CLLocationCoordinate2D, animated: Bool) {
+        shown = c
+        frame(animated: animated)
+    }
+
+    private func frame(animated: Bool) {
+        let span = max(160, radius * 5)
+        let region = MapCameraPosition.region(MKCoordinateRegion(center: shown ?? coordinate,
+                                                                 latitudinalMeters: span, longitudinalMeters: span))
+        if animated { withAnimation(Motion.smooth) { camera = region } } else { camera = region }
     }
 }
 

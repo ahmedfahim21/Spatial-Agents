@@ -5,7 +5,15 @@ import Observation
 /// GPS position and compass heading, or a simulated position in demo mode.
 @Observable @MainActor
 final class LocationService: NSObject, CLLocationManagerDelegate {
-    private(set) var coordinate: CLLocationCoordinate2D? { didSet { onMove?() } }
+    private(set) var coordinate: CLLocationCoordinate2D? {
+        didSet {
+            if hasFix != (coordinate != nil) { hasFix = coordinate != nil }
+            onMove?()
+        }
+    }
+    /// Whether there's a position at all. Views that only care about this read it instead of
+    /// `coordinate`, so they don't redraw on every GPS update.
+    private(set) var hasFix = false
     /// Horizontal accuracy in metres (smaller is better).
     private(set) var accuracy: Double = .infinity
     /// Phone heading, degrees from true north.
