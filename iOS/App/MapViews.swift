@@ -28,9 +28,14 @@ struct ExploreMap: View {
                     .foregroundStyle(a.tint.opacity(selected == a.id ? 0.22 : 0.14))
                     .stroke(a.tint.opacity(0.55), lineWidth: 1)
                 // Annotation content is hosted outside this view tree on device, so it can't
-                // read the environment: hand it everything it needs.
+                // read the environment: hand it everything it needs. Every change makes MapKit
+                // re-measure the marker, so faces stay still here (no blinking at 30 fps) and
+                // distance arrives as a size step, not a value that changes with every GPS fix.
                 Annotation(a.name, coordinate: a.coordinate!, anchor: .center) {
-                    MapBot(agent: a, mood: state.mood(for: a), distance: state.distance(to: a), selected: selected == a.id)
+                    MapBot(agent: a, mood: still(state.mood(for: a)),
+                           size: MapBot.size(distance: state.distance(to: a), selected: selected == a.id),
+                           selected: selected == a.id)
+                        .equatable()
                 }
                 .annotationTitles(.hidden)
                 .tag(a.id)
@@ -42,22 +47,35 @@ struct ExploreMap: View {
             MapCompass()
         }
         // Start at street level around you, once we know where you are.
-        .onChange(of: state.location.coordinate == nil, initial: true) { _, unknown in
-            guard !unknown, !framed, let here = state.location.coordinate else { return }
+        .onChange(of: state.location.hasFix, initial: true) { _, hasFix in
+            guard hasFix, !framed, let here = state.location.coordinate else { return }
             framed = true
             camera = .region(MKCoordinateRegion(center: here, latitudinalMeters: 700, longitudinalMeters: 700))
         }
     }
 
     @State private var framed = false
+
+    /// The still version of a mood, for the map.
+    private func still(_ mood: BotMood) -> BotMood {
+        switch mood {
+        case .error, .ended, .far: mood
+        default: .idle
+        }
+    }
 }
 
 /// An agent on the map: bigger when it's close, with its name when selected.
-private struct MapBot: View {
+private struct MapBot: View, Equatable {
     let agent: Agent
     let mood: BotMood
-    let distance: Double?
+    let size: CGFloat
     let selected: Bool
+
+    static func == (a: MapBot, b: MapBot) -> Bool {
+        a.agent.id == b.agent.id && a.agent.name == b.agent.name && a.agent.color == b.agent.color
+            && a.mood == b.mood && a.size == b.size && a.selected == b.selected
+    }
 
     var body: some View {
         VStack(spacing: 6) {
@@ -75,7 +93,7 @@ private struct MapBot: View {
         .animation(Motion.snappy, value: selected)
     }
 
-    private var size: CGFloat {
+    static func size(distance: Double?, selected: Bool) -> CGFloat {
         if selected { return 44 }
         guard let d = distance else { return 26 }
         switch d {

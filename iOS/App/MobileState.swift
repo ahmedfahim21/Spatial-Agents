@@ -268,10 +268,16 @@ final class MobileState {
     }
 
     func create(_ new: NewAgent) async throws -> Agent {
-        let a = try await backend.create(new)
+        var a = try await backend.create(new)
         myAgents.insert(a, at: 0)
+        if a.isGeo {
+            // Show it straight away; the server's list catches up in the background.
+            a.isMine = true
+            nearby.append(a)
+            updateArrivals()
+            Task { await refreshNearby(force: true) }
+        }
         syncPlacement()
-        if a.isGeo { await refreshNearby(force: true) }
         return a
     }
 

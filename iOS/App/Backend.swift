@@ -20,6 +20,9 @@ final class Backend: @unchecked Sendable {
 
     private let lock = NSLock()
     private var session: Session?
+    /// False once the database has told us it has no `shape` column, so later saves don't
+    /// pay for a failed round trip first.
+    private var shapeColumn = true
     private let encoder: JSONEncoder = {
         let e = JSONEncoder()
         e.keyEncodingStrategy = .convertToSnakeCase
@@ -89,15 +92,17 @@ final class Backend: @unchecked Sendable {
     }
 
     func create(_ agent: NewAgent) async throws -> Agent {
+        var agent = agent
+        if !lock.withLock({ shapeColumn }) { agent.shape = nil }
         let data: Data
         do {
             data = try await rest("agents", method: "POST", body: try encoder.encode(agent), prefer: "return=representation")
         } catch let error as BackendError where error.message.contains("'shape'") && agent.shape != nil {
             // The database predates agent shapes (migration 20261106120000 not applied yet):
             // save without it; the app derives a stable shape from the id.
-            var plain = agent
-            plain.shape = nil
-            data = try await rest("agents", method: "POST", body: try encoder.encode(plain), prefer: "return=representation")
+            lock.withLock { shapeColumn = false }
+            agent.shape = nil
+            data = try await rest("agents", method: "POST", body: try encoder.encode(agent), prefer: "return=representation")
         }
         guard let created = try decoder.decode([Agent].self, from: data).first else {
             throw BackendError(message: "The agent wasn't saved")
