@@ -3,6 +3,8 @@ import Foundation
 
 struct BackendError: LocalizedError {
     let message: String
+    /// The HTTP status, when the server answered.
+    var status: Int?
     var errorDescription: String? { message }
 }
 
@@ -20,6 +22,10 @@ final class Backend: @unchecked Sendable {
 
     private let lock = NSLock()
     private var session: Session?
+    /// The saved sign-in exists but couldn't be read (the phone was locked at launch).
+    private var sessionUnreadable = false
+    /// The sign-in or refresh in flight: everyone waiting for a token shares it.
+    private var signingIn: Task<Session, Error>?
     /// False once the database has told us it has no `shape` column, so later saves don't
     /// pay for a failed round trip first.
     private var shapeColumn = true
@@ -35,10 +41,26 @@ final class Backend: @unchecked Sendable {
     }()
 
     init() {
-        if let raw = Keychain.read("supabase-session"), let data = raw.data(using: .utf8),
-           let s = try? JSONDecoder().decode(Session.self, from: data) {
-            session = s
+        loadSession()
+    }
+
+    /// Reads the saved sign-in. Locked phone: remembers that it exists, so we wait rather
+    /// than start a new (empty) account.
+    private func loadSession() {
+        let (raw, status) = Keychain.lookup("supabase-session")
+        guard let raw, let data = raw.data(using: .utf8), let s = try? JSONDecoder().decode(Session.self, from: data) else {
+            let unreadable = status != errSecSuccess && status != errSecItemNotFound
+            lock.withLock { sessionUnreadable = unreadable }
+            if unreadable { print("Agentsphere: saved sign-in unreadable right now (\(status))") }
+            return
         }
+        lock.withLock {
+            session = s
+            sessionUnreadable = false
+        }
+        // Re-save so older installs move to an item that's readable while locked.
+        Keychain.write("supabase-session", raw)
+        print("Agentsphere: account \(s.userId)")
     }
 
     var userId: String? { lock.withLock { session?.userId } }
@@ -48,13 +70,43 @@ final class Backend: @unchecked Sendable {
     /// A valid access token, signing in anonymously or refreshing as needed.
     func token() async throws -> String {
         guard Config.isConfigured else { throw BackendError(message: "Supabase isn't configured yet (Config.swift).") }
-        if let s = lock.withLock({ session }) {
-            if s.expiresAt.timeIntervalSinceNow > 60 { return s.accessToken }
-            if let refreshed = try? await authRequest(path: "token?grant_type=refresh_token", body: ["refresh_token": s.refreshToken]) {
-                return refreshed.accessToken
+        if let s = lock.withLock({ session }), s.expiresAt.timeIntervalSinceNow > 60 { return s.accessToken }
+        return try await signInTask().value.accessToken
+    }
+
+    /// One sign-in at a time. Requests that arrive while it runs share its result, so
+    /// parallel calls at launch never race each other to refresh (or replace) the account.
+    private func signInTask() -> Task<Session, Error> {
+        lock.withLock {
+            if let t = signingIn { return t }
+            let t = Task { [weak self] () throws -> Session in
+                guard let self else { throw CancellationError() }
+                defer { self.lock.withLock { self.signingIn = nil } }
+                return try await self.signIn()
             }
+            signingIn = t
+            return t
         }
-        return try await authRequest(path: "signup", body: [:]).accessToken
+    }
+
+    /// Refreshes the account you have. A new account only when there has never been one, or
+    /// the server says this one is gone for good: never because a request failed (offline,
+    /// a timeout) or the phone was locked, which used to swap you to an empty account.
+    private func signIn() async throws -> Session {
+        if lock.withLock({ session == nil && sessionUnreadable }) { loadSession() }
+        if let s = lock.withLock({ session }) {
+            if s.expiresAt.timeIntervalSinceNow > 60 { return s }
+            do {
+                return try await authRequest(path: "token?grant_type=refresh_token", body: ["refresh_token": s.refreshToken])
+            } catch let e as BackendError where [400, 401, 403].contains(e.status ?? 0) {
+                print("Agentsphere: account \(s.userId) can't be refreshed (\(e.message)); starting a new one")
+            }
+        } else if lock.withLock({ sessionUnreadable }) {
+            throw BackendError(message: "Unlock your phone to finish signing in.")
+        }
+        let s = try await authRequest(path: "signup", body: [:])
+        print("Agentsphere: new account \(s.userId)")
+        return s
     }
 
     private func authRequest(path: String, body: [String: String]) async throws -> Session {
@@ -72,7 +124,10 @@ final class Backend: @unchecked Sendable {
         }
         let expiresIn = (obj["expires_in"] as? Double) ?? 3600
         let s = Session(accessToken: access, refreshToken: refresh, expiresAt: Date().addingTimeInterval(expiresIn), userId: user)
-        lock.withLock { session = s }
+        lock.withLock {
+            session = s
+            sessionUnreadable = false
+        }
         if let d = try? JSONEncoder().encode(s) { Keychain.write("supabase-session", String(decoding: d, as: UTF8.self)) }
         return s
     }
@@ -365,7 +420,7 @@ final class Backend: @unchecked Sendable {
             let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             let msg = (obj?["error"] as? String) ?? (obj?["message"] as? String) ?? (obj?["msg"] as? String)
                 ?? (obj?["error_description"] as? String) ?? "Server error \(http.statusCode)"
-            throw BackendError(message: msg)
+            throw BackendError(message: msg, status: http.statusCode)
         }
     }
 }

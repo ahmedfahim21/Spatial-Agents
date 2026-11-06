@@ -288,19 +288,34 @@ func makeKokoroVoice() -> VoiceEngine? { nil }
 enum Keychain {
     private static let service = "xyz.agentsphere.app"
 
-    static func read(_ account: String) -> String? {
+    static func read(_ account: String) -> String? { lookup(account).value }
+
+    /// The stored value, or why there isn't one. `errSecItemNotFound` means it was never
+    /// saved; anything else (the phone locked, say) means it's there but unreadable right now.
+    static func lookup(_ account: String) -> (value: String?, status: OSStatus) {
         let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
                                 kSecAttrAccount as String: account, kSecReturnData as String: true]
         var out: AnyObject?
-        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let d = out as? Data else { return nil }
-        return String(data: d, encoding: .utf8)
+        let status = SecItemCopyMatching(q as CFDictionary, &out)
+        guard status == errSecSuccess, let d = out as? Data else { return (nil, status) }
+        return (String(data: d, encoding: .utf8), status)
     }
 
-    static func write(_ account: String, _ value: String) {
-        delete(account)
-        let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-                                kSecAttrAccount as String: account, kSecValueData as String: Data(value.utf8)]
-        SecItemAdd(q as CFDictionary, nil)
+    /// Updates in place (never delete-then-add, which loses the value if the add fails), and
+    /// stays readable whenever the phone has been unlocked once since it started, so a
+    /// launch while it's locked in a pocket still finds it.
+    @discardableResult
+    static func write(_ account: String, _ value: String) -> Bool {
+        let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                                   kSecAttrAccount as String: account]
+        let attrs: [String: Any] = [kSecValueData as String: Data(value.utf8),
+                                    kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock]
+        var status = SecItemUpdate(base as CFDictionary, attrs as CFDictionary)
+        if status == errSecItemNotFound {
+            status = SecItemAdd(base.merging(attrs) { $1 } as CFDictionary, nil)
+        }
+        if status != errSecSuccess { print("Agentsphere: keychain write \(account) failed (\(status))") }
+        return status == errSecSuccess
     }
 
     static func delete(_ account: String) {
