@@ -12,6 +12,7 @@ final class SpatialAudio: AgentAudio {
     private var players: [UUID: AVAudioPlayerNode] = [:]
     private var azimuths: [UUID: Double] = [:]
     private var elevations: [UUID: Double] = [:]
+    private var closeness: [UUID: Double] = [:]
     private var voiceIndex: [UUID: Int] = [:]
     /// Each agent speaks one line at a time; a new line waits for the previous one.
     private var speechTail: [UUID: Task<Void, Never>] = [:]
@@ -47,7 +48,10 @@ final class SpatialAudio: AgentAudio {
         environment.outputType = .headphones
         environment.distanceAttenuationParameters.distanceAttenuationModel = .inverse
         environment.distanceAttenuationParameters.referenceDistance = 1
-        environment.reverbParameters.enable = false
+        // Reverb is per source (reverbBlend, 0 by default): only far-away agents get the room.
+        environment.reverbParameters.enable = true
+        environment.reverbParameters.loadFactoryReverbPreset(.mediumHall)
+        environment.reverbParameters.level = -4
         startEngine()
         // macOS stops the engine when the output changes (AirPods switching in and out of
         // headset mode, 44.1 ↔ 48 kHz). Changes come in bursts: recover once things settle.
@@ -153,9 +157,17 @@ final class SpatialAudio: AgentAudio {
         players[id] = nil
         azimuths[id] = nil
         elevations[id] = nil
+        closeness[id] = nil
         voiceIndex[id] = nil
         speechTail[id]?.cancel()
         speechTail[id] = nil
+    }
+
+    /// How near a source sounds, 0 (far: muffled and roomy) ... 1 (close: crisp and dry).
+    /// Volume alone is easy to misread; tone and room together read as distance.
+    func setCloseness(id: UUID, _ value: Double) {
+        closeness[id] = max(0, min(1, value))
+        updatePosition(id)
     }
 
     /// Per-agent loudness, 0...1 (e.g. a beacon that grows as you approach).
@@ -191,6 +203,12 @@ final class SpatialAudio: AgentAudio {
             y: Float(sin(el)) * radius,
             z: -Float(cos(rel) * cos(el)) * radius
         )
+        // Far: muffled and roomy. Behind you: a little muffled too, which helps tell
+        // front from back (the classic spatial-audio confusion).
+        let near = closeness[id] ?? 1
+        let behind = abs(normalizeAngle(az - headYaw)) > 110
+        player.occlusion = Float(-(1 - near) * 18 - (behind ? 6 : 0))
+        player.reverbBlend = Float((1 - near) * 0.5)
     }
 
     // MARK: - Sound

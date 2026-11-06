@@ -154,7 +154,7 @@ private struct NearbyRow: View {
                 Text("Here").font(.body.weight(.semibold)).foregroundStyle(.primary)
             } else if let d = state.distance(to: agent) {
                 HStack(spacing: 6) {
-                    Text(Words.distance(d)).monospacedDigit()
+                    Text(state.distanceText(d)).monospacedDigit()
                     if let rot = state.screenArrow(to: agent) ?? state.bearing(to: agent) {
                         Image(systemName: "location.north.fill")
                             .font(.system(size: 11))
@@ -282,7 +282,8 @@ private struct SelectedCard: View {
         if state.arrived.contains(agent.id) {
             parts.append("You're here")
         } else if let d = state.distance(to: agent) {
-            parts.append(Words.distance(d) + (state.bearing(to: agent).map { " " + Words.compass($0) } ?? ""))
+            let text = state.distanceText(d)
+            parts.append(text == "Nearby" ? text : text + (state.bearing(to: agent).map { " " + Words.compass($0) } ?? ""))
         }
         parts.append(agent.isMine == true && !agent.isPublic ? "Only you" : agent.pricing == "paid" ? "Paid" : "Free")
         return parts.joined(separator: " · ")

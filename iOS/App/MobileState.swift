@@ -49,6 +49,53 @@ final class MobileState {
     }
     var findTargetId: UUID? { didSet { if oldValue != findTargetId { findTargetChanged() } } }
     private(set) var arrived: Set<UUID> = []
+    /// How close the agent you're finding is, in steps rather than raw metres (GPS is too
+    /// noisy for metres up close). Changes only after holding for 3 s, and each step is left
+    /// further out than it was entered, so it doesn't flicker.
+    enum Proximity: Equatable {
+        case far, close, nearby, here
+        var title: String {
+            switch self {
+            case .far: "Far"
+            case .close: "Getting close"
+            case .nearby: "Nearby"
+            case .here: "Here"
+            }
+        }
+    }
+    private(set) var findProximity: Proximity = .far
+    /// "Getting closer" / "Getting farther", from the last ~10 s (more reliable than metres).
+    private(set) var findTrend: String?
+    @ObservationIgnored private var proximityCandidate: (state: Proximity, since: Date)?
+    @ObservationIgnored private var proximityFresh = true
+    @ObservationIgnored private var findDistances: [(at: Date, d: Double)] = []
+
+    /// How much agents near you say as you walk by (with headphones in).
+    enum Announce: String, CaseIterable, Identifiable {
+        case voice, sounds, off
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .voice: "Voice and sounds"
+            case .sounds: "Sounds only"
+            case .off: "Off"
+            }
+        }
+    }
+    var announce = Announce(rawValue: UserDefaults.standard.string(forKey: "announce") ?? "") ?? .voice {
+        didSet { UserDefaults.standard.set(announce.rawValue, forKey: "announce") }
+    }
+    private struct Announcement { let id: UUID; let arrival: Bool; let at: Date }
+    /// Waiting to be said, one at a time.
+    @ObservationIgnored private var announcements: [Announcement] = []
+    /// Agents whose discovery radius you're inside (left at 1.5x the radius).
+    @ObservationIgnored private var discovered: Set<UUID> = []
+    @ObservationIgnored private var lastAnnounced: [UUID: Date] = [:]
+    /// The agent introducing itself right now (placed in the scene while it talks).
+    @ObservationIgnored private var announcing: UUID?
+    @ObservationIgnored private var announcingSince = Date.distantPast
+    @ObservationIgnored private var headphonesIn = false
+
     /// Shops' menus, fetched when you arrive at one (shown over it on the map).
     private(set) var menus: [UUID: [CatalogItem]] = [:]
 
@@ -401,6 +448,19 @@ final class MobileState {
         return GeoMath.bearing(from: here, to: CLLocationCoordinate2D(latitude: lat, longitude: lng))
     }
 
+    /// A distance as precise as the fix allows ("Nearby" within GPS error).
+    func distanceText(_ d: Double) -> String {
+        GeoMath.describe(distance: d, accuracy: location.simulated != nil ? 0 : location.accuracy)
+    }
+
+    /// How wide the Find arrow's glow should be: wider when position or heading is unsure.
+    func arrowSpread(to a: Agent) -> Double {
+        guard let d = distance(to: a) else { return 90 }
+        let position = atan2(min(location.accuracy, 60), max(d, 1)) * 180 / .pi
+        let heading = location.headingAccuracy.isFinite ? location.headingAccuracy : 30
+        return min(90, max(35, 25 + position + heading))
+    }
+
     func arrivalRadius(for a: Agent) -> Double {
         GeoMath.arrivalRadius(agentRadius: a.radiusM, accuracy: location.accuracy)
     }
@@ -421,6 +481,7 @@ final class MobileState {
         for a in nearby where a.isGeo {
             guard let d = distance(to: a) else { continue }
             let r = arrivalRadius(for: a)
+            noteDiscovery(a, distance: d, arrivalRadius: r)
             if d <= r {
                 if !now.contains(a.id) {
                     now.insert(a.id)
@@ -446,12 +507,96 @@ final class MobileState {
         if findTargetId == a.id { haptics.distance = nil }
         ensurePlaced(a)
         audio.setGain(id: a.id, gain: 1)
-        audio.cue(.chime, from: a.id)
+        audio.setCloseness(id: a.id, 1)
+        if announce == .voice, headphonesIn {
+            // "You're at …" goes ahead of any discoveries waiting.
+            announcements.removeAll { $0.id == a.id }
+            announcements.insert(Announcement(id: a.id, arrival: true, at: Date()), at: 0)
+        } else if announce != .off {
+            audio.cue(.chime, from: a.id)
+        }
+    }
+
+    // MARK: - Announcements
+
+    /// Inside this, an agent introduces itself: a little beyond where you'd arrive.
+    private func discoveryRadius(_ arrival: Double) -> Double { arrival + 60 }
+
+    /// Entering an agent's discovery radius queues its introduction; leaving (at 1.5x the
+    /// radius, so a jittery fix at the edge doesn't count) lets it introduce itself again.
+    private func noteDiscovery(_ a: Agent, distance d: Double, arrivalRadius r: Double) {
+        let radius = discoveryRadius(r)
+        if d < radius, d > r, !discovered.contains(a.id) {
+            discovered.insert(a.id)
+            let recent = lastAnnounced[a.id].map { Date().timeIntervalSince($0) < 60 } ?? false
+            if !recent, findTargetId != a.id, !announcements.contains(where: { $0.id == a.id }) {
+                announcements.append(Announcement(id: a.id, arrival: false, at: Date()))
+            }
+        } else if d > radius * 1.5 {
+            discovered.remove(a.id)
+        }
+    }
+
+    /// Says the next introduction when nothing else is talking: one at a time, nearest first.
+    private func announceTick() {
+        if let current = announcing {
+            // Keep it in the scene until its line has played, then let it go.
+            if !audio.isSpeaking, Date().timeIntervalSince(announcingSince) > 1.5 {
+                announcing = nil
+                if current != activeId { syncPlacement() }
+            }
+            return
+        }
+        guard announce != .off, headphonesIn, activeId == nil, !audio.isSpeaking else {
+            if announce == .off || !headphonesIn { announcements.removeAll() }
+            return
+        }
+        announcements.removeAll { item in
+            Date().timeIntervalSince(item.at) > 45 || agent(item.id) == nil
+                || (!item.arrival && (!discovered.contains(item.id) || arrived.contains(item.id)))
+        }
+        guard !announcements.isEmpty else { return }
+        let next = announcements.first(where: \.arrival)
+            ?? announcements.min { (distanceTo($0.id) ?? .infinity) < (distanceTo($1.id) ?? .infinity) }!
+        announcements.removeAll { $0.id == next.id }
+        guard let a = agent(next.id) else { return }
+        say(a, arrival: next.arrival)
+    }
+
+    private func distanceTo(_ id: UUID) -> Double? { agent(id).flatMap(distance(to:)) }
+
+    private func say(_ a: Agent, arrival: Bool) {
+        announcing = a.id
+        announcingSince = Date()
+        lastAnnounced[a.id] = Date()
+        syncPlacement()
+        if !arrival, let d = distance(to: a) {
+            audio.setCloseness(id: a.id, max(0.25, 1 - d / 300))
+        }
+        let direction = exactAngle(a.id).map(Words.voiceDirection)
+        print("Agentsphere: announce \(a.name) (\(arrival ? "arrival" : "nearby"), \(direction ?? "no direction"))")
+        guard announce == .voice else {
+            audio.cue(.chime, from: a.id)
+            return
+        }
+        let line: String
+        if arrival {
+            line = "You're at \(a.name)." + (hasHeadData ? " Look toward it and nod to talk." : "")
+        } else {
+            let far = distance(to: a).map { GeoMath.spoken(distance: $0, accuracy: location.accuracy) }
+            line = [a.name, direction, far].compactMap { $0 }.joined(separator: ", ") + "."
+        }
+        audio.speak(line, from: a.id, prelude: .chime)
     }
 
     /// Find mode: haptics and a beacon from the agent's real direction, stronger as you near it.
     private func findTargetChanged() {
         haptics.distance = nil
+        proximityFresh = true
+        proximityCandidate = nil
+        findDistances = []
+        findTrend = nil
+        findProximity = findTargetId.map { arrived.contains($0) } == true ? .here : .far
         syncPlacement()
         updateFindFeedback()
     }
@@ -463,11 +608,51 @@ final class MobileState {
         }
         if arrived.contains(id) {
             haptics.distance = nil
+            findProximity = .here
             return
         }
         let beyond = max(0, d - arrivalRadius(for: a))
         haptics.distance = beyond
         audio.setGain(id: id, gain: GeoMath.beaconGain(distance: beyond))
+        audio.setCloseness(id: id, 1 - min(beyond, 250) / 250)
+        updateProximity(beyond: beyond)
+        updateTrend(d)
+    }
+
+    private func updateProximity(beyond b: Double) {
+        let current = findProximity
+        // Entered at 20 m / 120 m beyond arrival; left at 1.5x that.
+        let nearbyLimit: Double = current == .nearby ? 30 : 20
+        let closeLimit: Double = current == .close || current == .nearby ? 180 : 120
+        let raw: Proximity = b < nearbyLimit ? .nearby : b < closeLimit ? .close : .far
+        if proximityFresh || current == .here {
+            proximityFresh = false
+            findProximity = raw
+            proximityCandidate = nil
+            return
+        }
+        guard raw != current else { proximityCandidate = nil; return }
+        if let c = proximityCandidate, c.state == raw {
+            if Date().timeIntervalSince(c.since) >= 3 {
+                findProximity = raw
+                proximityCandidate = nil
+            }
+        } else {
+            proximityCandidate = (raw, Date())
+        }
+    }
+
+    private func updateTrend(_ d: Double) {
+        let now = Date()
+        findDistances.append((now, d))
+        findDistances.removeAll { now.timeIntervalSince($0.at) > 12 }
+        guard let oldest = findDistances.first, now.timeIntervalSince(oldest.at) >= 8, !location.stationary else {
+            findTrend = nil
+            return
+        }
+        let change = d - oldest.d
+        let next: String? = change < -4 ? "Getting closer" : change > 4 ? "Getting farther" : nil
+        if next != findTrend { findTrend = next }
     }
 
     private func beaconTick() {
@@ -507,6 +692,7 @@ final class MobileState {
         want.formUnion(arrived)
         if let f = findTargetId { want.insert(f) }
         if let active = activeId { want.insert(active) }
+        if let speaking = announcing { want.insert(speaking) }
 
         for id in placed.subtracting(want) {
             audio.remove(id: id)
@@ -680,6 +866,7 @@ final class MobileState {
         }
         if !hasHeadData { updateScene() }   // phone heading drives focus without AirPods
         beaconTick()
+        announceTick()
 
         // Conversation housekeeping.
         guard let active = activeId else { return }
@@ -1178,6 +1365,7 @@ final class MobileState {
         route = AudioSession.routeDescription
         highQualityMic = AudioSession.highQualityMic
         routeName = AVAudioSession.sharedInstance().currentRoute.outputs.first?.portName ?? "Headphones"
+        headphonesIn = AudioSession.headphonesConnected
     }
 
     /// Demo mode: walk 10 m toward the Find target without moving.

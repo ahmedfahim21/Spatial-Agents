@@ -23,6 +23,13 @@ struct SettingsView: View {
                         .disabled(!state.hasHeadData)
                     Button("Arrange your space") { arranging = true }
                 }
+                Section {
+                    Picker("Nearby agents", selection: $state.announce) {
+                        ForEach(MobileState.Announce.allCases) { Text($0.title).tag($0) }
+                    }
+                } header: { Text("Walking around") } footer: {
+                    Text("With headphones in, agents near you introduce themselves from where they are, one at a time. Works with your phone in your pocket.")
+                }
                 Section("Audio") {
                     LabeledContent("Output", value: state.routeName)
                     LabeledContent("Stereo with mic open", value: state.highQualityMic ? "Yes" : "No")
@@ -37,7 +44,9 @@ struct SettingsView: View {
                 }
                 Section {
                     LabeledContent("Accuracy", value: loc.coordinate == nil ? "–" : "±\(Int(loc.accuracy)) m")
-                    LabeledContent("Heading", value: loc.heading.map { "\(Int($0))° \(Words.compassShort($0))" } ?? "–")
+                    LabeledContent("Heading", value: loc.heading.map { "\(Int($0))° \(Words.compassShort($0)) ±\(Int(min(loc.headingAccuracy, 180)))°" } ?? "–")
+                    LabeledContent("Indoors", value: loc.indoors ? "Yes (rough fix)" : "No")
+                    LabeledContent("Standing still", value: loc.stationary ? "Yes (position held)" : "No")
                     Toggle("Demo mode", isOn: Binding(get: { loc.simulated != nil }, set: { state.setDemoMode($0) }))
                         .tint(.green)
                 } header: { Text("Location") } footer: { Text("Simulates your location for stage demos.") }

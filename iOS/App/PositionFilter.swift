@@ -24,7 +24,7 @@ struct PositionFilter {
     /// Returns the smoothed position, or nil if this fix was dropped.
     mutating func add(_ l: CLLocation) -> CLLocationCoordinate2D? {
         let acc = l.horizontalAccuracy
-        guard acc >= 0, abs(l.timestamp.timeIntervalSinceNow) < 10 else { return nil }
+        guard acc >= 0, abs(l.timestamp.timeIntervalSinceNow) < 5 else { return nil }
 
         guard let o = origin, let t = lastTime, let prev = lastAccepted else {
             origin = l.coordinate; east = 0; north = 0

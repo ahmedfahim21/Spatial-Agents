@@ -54,6 +54,7 @@ private struct FindingStage: View {
     var body: some View {
         let remaining = state.distance(to: agent).map { max(0, $0 - state.arrivalRadius(for: agent)) }
         let relative = state.screenArrow(to: agent)
+        let nearby = state.findProximity == .nearby
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 HStack(spacing: 8) {
@@ -68,27 +69,39 @@ private struct FindingStage: View {
             .padding(.top, 12)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(remaining.map(Words.distance) ?? "–")
+                Text(headline(remaining))
                     .font(.system(size: 72, weight: .bold))
                     .tracking(-2)
                     .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
                     .contentTransition(.numericText(countsDown: true))
-                    .animation(Motion.snappy, value: remaining.map { Int($0) })
-                Text(directionText(relative))
+                    .animation(Motion.snappy, value: headline(remaining))
+                Text(nearby ? "Look around" : directionText(relative))
                     .font(.title2.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .contentTransition(.opacity)
-                    .animation(Motion.snappy, value: directionText(relative))
+                    .animation(Motion.snappy, value: nearby ? "Look around" : directionText(relative))
+                if let trend = state.findTrend {
+                    Label(trend, systemImage: trend == "Getting closer" ? "arrow.down.forward.circle.fill" : "arrow.up.backward.circle")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(trend == "Getting closer" ? Color.green : Color.orange)
+                        .padding(.top, 6)
+                        .transition(.opacity)
+                }
             }
             .padding(.top, 28)
 
             Spacer(minLength: 12)
-            Dial(angle: relative ?? state.bearing(to: agent))
+            Dial(angle: nearby ? nil : relative ?? state.bearing(to: agent),
+                 spread: state.arrowSpread(to: agent), lookAround: nearby)
                 .frame(maxWidth: .infinity)
             Spacer(minLength: 12)
 
             VStack(spacing: 14) {
-                Text("Pulses speed up as you get closer. With AirPods in, follow its beacon.")
+                Text(state.location.indoors
+                     ? "Indoors, GPS is rough, so distance is shown in steps. Follow the beacon in your AirPods."
+                     : "Pulses speed up as you get closer. With AirPods in, follow its beacon.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -101,6 +114,17 @@ private struct FindingStage: View {
             .padding(.bottom, 8)
         }
         .padding(.horizontal, 24)
+    }
+
+    /// Metres outdoors with a good fix; steps ("Getting close") indoors or within GPS error.
+    private func headline(_ remaining: Double?) -> String {
+        guard let remaining else { return "–" }
+        if state.findProximity == .nearby { return "Nearby" }
+        if state.location.indoors {
+            if let d = state.distance(to: agent), d < 50 { return "In this building" }
+            return state.findProximity.title
+        }
+        return state.distanceText(remaining)
     }
 
     private func directionText(_ relative: Double?) -> String {
@@ -142,6 +166,10 @@ private struct VoiceDirection: View {
 private struct Dial: View {
     /// Degrees clockwise from straight up; nil hides the arrow.
     let angle: Double?
+    /// How wide the glow is (degrees): wider when position or heading is unsure.
+    var spread: Double = 55
+    /// Close enough that direction means little: no arrow, look around instead.
+    var lookAround = false
     /// The arrow's displayed rotation, unwrapped so it never spins the long way round.
     @State private var shown: Double = 0
 
@@ -153,7 +181,7 @@ private struct Dial: View {
                 for i in 0..<48 {
                     let deg = Double(i) * 7.5
                     let off = angle.map { abs(normalizeAngle(deg - $0)) } ?? 180
-                    let near = max(0, 1 - off / 55)
+                    let near = lookAround ? 0.35 : max(0, 1 - off / spread)
                     let dot = 2.4 + 2.6 * near
                     let a = (deg - 90) * .pi / 180
                     let p = CGPoint(x: c.x + cos(a) * r, y: c.y + sin(a) * r)
@@ -167,6 +195,14 @@ private struct Dial: View {
                     .frame(width: 92, height: 116)
                     .rotationEffect(.degrees(shown))
                     .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            } else if lookAround {
+                VStack(spacing: 8) {
+                    Image(systemName: "eye.fill")
+                        .font(.system(size: 52, weight: .semibold))
+                        .symbolEffect(.pulse, options: .repeating)
+                    Text("It's around you").font(.headline).foregroundStyle(.secondary)
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
             } else {
                 ProgressView()
             }

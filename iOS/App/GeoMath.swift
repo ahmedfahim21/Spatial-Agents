@@ -50,8 +50,20 @@ enum GeoMath {
         0.2 + 0.8 * (1 - min(max(distance, 0), 250) / 250)
     }
 
-    static func describe(distance d: Double) -> String {
-        if d < 1000 { return "\(Int(d.rounded())) m" }
-        return String(format: "%.1f km", d / 1000)
+    /// A distance no more precise than we know it. Within the fix's accuracy it's "Nearby";
+    /// beyond, the nearest 5 m (under 20 m), 10 m (under 100 m), 50 m, or tenth of a km.
+    static func describe(distance d: Double, accuracy: Double = 0) -> String {
+        if d < max(accuracy, 0) + 5 { return "Nearby" }
+        let step: Double = d < 20 ? 5 : d < 100 ? 10 : 50
+        let r = max(step, (d / step).rounded() * step)
+        if r >= 1000 { return String(format: "%.1f km", d / 1000) }
+        return "\(Int(r)) m"
+    }
+
+    /// The same, for a voice to say: "about 50 metres", "close by".
+    static func spoken(distance d: Double, accuracy: Double = 0) -> String {
+        let s = describe(distance: d, accuracy: accuracy)
+        if s == "Nearby" { return "close by" }
+        return "about " + s.replacingOccurrences(of: " km", with: " kilometres").replacingOccurrences(of: " m", with: " metres")
     }
 }

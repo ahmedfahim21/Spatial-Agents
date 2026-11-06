@@ -48,7 +48,7 @@ struct AgentDetailView: View {
                             if agent.isGeo {
                                 RowDivider(); row("Reach", "\(Int(agent.radiusM)) m")
                                 if let d = state.distance(to: agent) {
-                                    RowDivider(); row("Distance", Words.distance(d))
+                                    RowDivider(); row("Distance", state.distanceText(d))
                                 }
                             }
                             if agent.isPublic {
@@ -204,7 +204,10 @@ struct AgentDetailView: View {
         var parts = [a.isPublic ? "Public" : "Private"]
         if a.isPublic { parts.append(a.pricing == "paid" ? "Shop" : "Free") }
         if a.isGeo {
-            if let d = state.distance(to: a) { parts.append("\(Words.distance(d)) away") }
+            if let d = state.distance(to: a) {
+                let text = state.distanceText(d)
+                parts.append(text == "Nearby" ? text : "\(text) away")
+            }
         } else {
             parts.append("With you")
         }

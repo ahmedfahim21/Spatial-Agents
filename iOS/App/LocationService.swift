@@ -1,4 +1,5 @@
 import CoreLocation
+import CoreMotion
 import Foundation
 import Observation
 
@@ -20,10 +21,18 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
     private(set) var heading: Double? { didSet { onHeading?() } }
     private(set) var headingAccuracy: Double = .infinity
     private(set) var authorization: CLAuthorizationStatus = .notDetermined
+    /// The fix has stayed rough (worse than 20 m) for 10 s: you're probably inside. Distances
+    /// are then shown as words, never falsely precise numbers.
+    private(set) var indoors = false
+    /// The phone's motion says you're standing still: the position holds instead of drifting.
+    private(set) var stationary = false
+    @ObservationIgnored private var roughSince: Date?
+    @ObservationIgnored private let activity = CMMotionActivityManager()
+    @ObservationIgnored private var watchingActivity = false
 
     /// Demo mode: pretend to be here instead of using GPS.
     var simulated: CLLocationCoordinate2D? {
-        didSet { if let s = simulated { coordinate = s; accuracy = 5 } }
+        didSet { if let s = simulated { coordinate = s; accuracy = 5; indoors = false } }
     }
 
     @ObservationIgnored var onMove: (() -> Void)?
@@ -53,16 +62,46 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
         if manager.authorizationStatus == .notDetermined { manager.requestWhenInUseAuthorization() }
         manager.startUpdatingLocation()
         if CLLocationManager.headingAvailable() { manager.startUpdatingHeading() }
+        // Precise Location off: finding an agent a few metres away needs it, so ask for it
+        // for this session.
+        if isAuthorized, manager.accuracyAuthorization == .reducedAccuracy {
+            manager.requestTemporaryFullAccuracyAuthorization(withPurposeKey: "FindAgents")
+        }
+        if !watchingActivity, CMMotionActivityManager.isActivityAvailable() {
+            watchingActivity = true
+            activity.startActivityUpdates(to: .main) { [weak self] a in
+                guard let a else { return }
+                MainActor.assumeIsolated {
+                    self?.stationary = a.stationary && !a.walking && !a.running && !a.cycling
+                        && !a.automotive && a.confidence != .low
+                }
+            }
+        }
     }
 
     nonisolated func locationManager(_ m: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         Task { @MainActor in
             guard self.simulated == nil else { return }
             for l in locations {
+                self.noteRoughness(l.horizontalAccuracy)
                 guard let fix = self.filter.add(l) else { continue }
+                // Standing still: hold the position (so distances don't drift) unless the
+                // new fix is clearly better than the one we have.
+                if self.stationary, self.coordinate != nil, l.horizontalAccuracy > self.accuracy - 3 { continue }
                 self.coordinate = fix
                 self.accuracy = l.horizontalAccuracy
             }
+        }
+    }
+
+    private func noteRoughness(_ acc: Double) {
+        guard acc >= 0 else { return }
+        if acc > 20 {
+            if roughSince == nil { roughSince = Date() }
+            if let since = roughSince, Date().timeIntervalSince(since) > 10, !indoors { indoors = true }
+        } else if acc <= 15 {
+            roughSince = nil
+            if indoors { indoors = false }
         }
     }
 

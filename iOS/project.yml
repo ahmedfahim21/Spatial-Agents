@@ -33,6 +33,8 @@ targets:
         NSSpeechRecognitionUsageDescription: Your words are transcribed on-device and sent to the agent you're talking to.
         NSMotionUsageDescription: AirPods head tracking lets you face an agent to select it and nod or shake to answer.
         NSLocationWhenInUseUsageDescription: Air Agents uses your location to find agents placed nearby and to place your own.
+        NSLocationTemporaryUsageDescriptionDictionary:
+          FindAgents: Precise location lets you find agents placed a few metres away.
         NSLocationAlwaysAndWhenInUseUsageDescription: Air Agents can tell you when an agent is nearby.
         NSCalendarsFullAccessUsageDescription: Your agents can tell you what's on your calendar and add events when you ask.
         NSRemindersFullAccessUsageDescription: Your agents can read your to-dos and add or tick off reminders when you ask.

@@ -43,6 +43,11 @@
 	<string>Air Agents doesn't write to Apple Health.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Air Agents can tell you when an agent is nearby.</string>
+	<key>NSLocationTemporaryUsageDescriptionDictionary</key>
+	<dict>
+		<key>FindAgents</key>
+		<string>Precise location lets you find agents placed a few metres away.</string>
+	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Air Agents uses your location to find agents placed nearby and to place your own.</string>
 	<key>NSMicrophoneUsageDescription</key>

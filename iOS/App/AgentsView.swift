@@ -114,7 +114,7 @@ private struct AgentRow: View {
     private var whereabouts: String {
         if !agent.isGeo { return state.zones[agent.id]?.name ?? "No window" }
         if state.arrived.contains(agent.id) { return "Here" }
-        return state.distance(to: agent).map(Words.distance) ?? ""
+        return state.distance(to: agent).map(state.distanceText) ?? ""
     }
 }
 

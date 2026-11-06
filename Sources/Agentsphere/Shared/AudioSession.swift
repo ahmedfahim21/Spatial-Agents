@@ -38,6 +38,12 @@ enum AudioSession {
         AVAudioSession.sharedInstance().currentRoute.inputs.first?.portName ?? "Default input"
     }
 
+    /// Sound goes to headphones (AirPods or wired), not the loudspeaker.
+    static var headphonesConnected: Bool {
+        let kinds: [AVAudioSession.Port] = [.headphones, .bluetoothA2DP, .bluetoothHFP, .bluetoothLE]
+        return AVAudioSession.sharedInstance().currentRoute.outputs.contains { kinds.contains($0.portType) }
+    }
+
     static var routeDescription: String {
         let r = AVAudioSession.sharedInstance().currentRoute
         let ins = r.inputs.map(\.portName).joined(separator: ", ")
