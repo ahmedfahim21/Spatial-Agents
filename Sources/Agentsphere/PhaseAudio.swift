@@ -11,9 +11,26 @@ protocol AgentAudio: AnyObject {
     func register(id: UUID, azimuth: Double, voiceIndex: Int)
     func remove(id: UUID)
     func setAzimuth(id: UUID, azimuth: Double)
-    func speak(_ text: String, from id: UUID)
+    /// `prelude` plays first on the same agent (e.g. the reply chime), in order with the speech.
+    func speak(_ text: String, from id: UUID, prelude: AudioCue?)
     func ping(from id: UUID, high: Bool)
+    /// A short sound from the agent's position, played immediately.
+    func cue(_ cue: AudioCue, from id: UUID)
     var onSpeakingChanged: ((Bool) -> Void)? { get set }
+}
+
+extension AgentAudio {
+    func speak(_ text: String, from id: UUID) { speak(text, from: id, prelude: nil) }
+}
+
+/// Earcons, each distinct so you know what happened without looking.
+enum AudioCue {
+    /// Rising two-note beep: the mic is open, go ahead and talk.
+    case listening
+    /// Bell: a reply has arrived (plays before the spoken reply).
+    case chime
+    /// Falling two-note tone: something went wrong.
+    case error
 }
 
 enum AudioBackendKind: String, CaseIterable, Identifiable {
@@ -177,18 +194,20 @@ final class PhaseAgentAudio: AgentAudio {
         }
     }
 
-    func speak(_ text: String, from id: UUID) {
+    func speak(_ text: String, from id: UUID, prelude: AudioCue?) {
         guard let a = agents[id] else { return }
         let previous = speechTail[id]
         let target = format
         let stream = a.stream
+        let preludeBuffer = prelude.flatMap { AudioConvert.cue($0, format: target) }
         speechTail[id] = Task { [weak self] in
             await previous?.value
             guard let self, !Task.isCancelled else { return }
             self.speakingDelta(1)
             defer { self.speakingDelta(-1) }
+            if let preludeBuffer { stream.scheduleBuffer(buffer: preludeBuffer) }
             var converter: AVAudioConverter?
-            var scheduled = false
+            var scheduled = preludeBuffer != nil
             await self.voices.speak(text, voiceIndex: a.voiceIndex) { pcm in
                 guard pcm.frameLength > 0 else { return }
                 if converter == nil || converter?.inputFormat != pcm.format {
@@ -211,6 +230,11 @@ final class PhaseAgentAudio: AgentAudio {
     func ping(from id: UUID, high: Bool) {
         guard let a = agents[id], let tone = AudioConvert.tone(frequency: high ? 990 : 660, format: format) else { return }
         a.stream.scheduleBuffer(buffer: tone)
+    }
+
+    func cue(_ cue: AudioCue, from id: UUID) {
+        guard let a = agents[id], let buf = AudioConvert.cue(cue, format: format) else { return }
+        a.stream.scheduleBuffer(buffer: buf)
     }
 }
 
@@ -307,6 +331,37 @@ enum AudioConvert {
         }
         if status == .error || out.frameLength == 0 { return nil }
         return out
+    }
+
+    /// Synthesizes an earcon. Notes are (frequency, start, length) with bell-like partials.
+    static func cue(_ cue: AudioCue, format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        typealias Note = (hz: Double, start: Double, length: Double)
+        let notes: [Note]
+        let level: Double
+        let decay: Double
+        switch cue {
+        case .listening: notes = [(784, 0, 0.09), (1175, 0.1, 0.16)]; level = 0.22; decay = 9      // G5 → D6
+        case .chime:     notes = [(1047, 0, 0.7), (1319, 0.13, 0.8)]; level = 0.2; decay = 4.5     // C6 → E6 bell
+        case .error:     notes = [(659, 0, 0.14), (494, 0.15, 0.24)]; level = 0.22; decay = 7      // E5 → B4
+        }
+        let sr = format.sampleRate
+        let total = notes.map { $0.start + $0.length }.max() ?? 0.3
+        let frames = AVAudioFrameCount(sr * total)
+        guard let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames),
+              let data = buf.floatChannelData?[0] else { return nil }
+        buf.frameLength = frames
+        for i in 0..<Int(frames) {
+            let t = Double(i) / sr
+            var v = 0.0
+            for n in notes where t >= n.start && t < n.start + n.length {
+                let lt = t - n.start
+                let env = min(1, lt / 0.004) * exp(-lt * decay) * min(1, (n.length - lt) / 0.02)
+                let w = 2 * Double.pi * n.hz * lt
+                v += (sin(w) + 0.35 * sin(2 * w) + 0.12 * sin(3 * w)) * env
+            }
+            data[i] = Float(v * level)
+        }
+        return buf
     }
 
     static func tone(frequency: Double, duration: Double = 0.12, format: AVAudioFormat) -> AVAudioPCMBuffer? {

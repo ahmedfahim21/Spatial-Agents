@@ -375,7 +375,11 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// When the current agent got focus; the listening beep lands ~1 s after this.
+    private var focusedAt = Date()
+
     private func focusDidChange() {
+        focusedAt = Date()
         dwellWork?.cancel()
         // Facing someone else before saying anything: close the mic.
         if handsFreeActive, utteranceTarget == nil, listeningTarget != focusedId { stopListening() }
@@ -388,7 +392,8 @@ final class AppState: ObservableObject {
         guard handsFree, focusedId != nil, !isListening, !agentsSpeaking, pendingSend == nil, !showDiscover else { return }
         let work = DispatchWorkItem { [weak self] in self?.startHandsFree() }
         dwellWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+        // Open the mic a little before the beep so AirPods finish switching to headset mode.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
     }
 
     private func startHandsFree() {
@@ -409,11 +414,14 @@ final class AppState: ObservableObject {
             self.lastHeardAt = Date()
             self.listenStartedAt = Date()
             self.micName = self.speech.inputName
-            // AirPods take a moment to switch to headset mode; tick once they have.
-            let delay = self.speech.keepsInputOpen ? 0 : 0.6
+            // "I'm listening" beep about 1 s after you turned to the agent, and at least
+            // 0.5 s after the AirPods mic opened so the headset switch has settled.
+            let sinceFocus = Date().timeIntervalSince(self.focusedAt)
+            let settle = self.speech.keepsInputOpen ? 0.0 : 0.5
+            let delay = max(1.0 - sinceFocus, settle)
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self, self.handsFreeActive, self.listeningTarget == id else { return }
-                self.audio.ping(from: id, high: false)
+                self.audio.cue(.listening, from: id)
             }
         }
     }
@@ -571,7 +579,8 @@ final class AppState: ObservableObject {
             post(ChatMessage(.agent, result.text), to: id)
         }
         appendLog(speaker: sessions[i].name, text: result.text, fromUser: false)
-        audio.speak(Summarizer.spoken(result.text, isError: result.isError), from: id)
+        // Chime first (or the error tone), then the reply; queued together so the order holds.
+        audio.speak(Summarizer.spoken(result.text, isError: result.isError), from: id, prelude: result.isError ? .error : .chime)
     }
 
     func appendLog(speaker: String, text: String, fromUser: Bool) {

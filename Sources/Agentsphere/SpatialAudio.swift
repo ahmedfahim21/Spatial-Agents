@@ -114,18 +114,24 @@ final class SpatialAudio: AgentAudio {
     /// Speaks text from the agent's position in the room.
     /// Speaks text from the agent's position. The voice engine (ElevenLabs, Kokoro or Apple)
     /// streams chunks; each is resampled and scheduled on the agent's spatial player.
-    func speak(_ text: String, from id: UUID) {
+    func speak(_ text: String, from id: UUID, prelude: AudioCue?) {
         guard let player = players[id], let index = voiceIndex[id] else { return }
         startEngine()
         let previous = speechTail[id]
         let target = format
+        let preludeBuffer = prelude.flatMap { AudioConvert.cue($0, format: target) }
         speechTail[id] = Task { [weak self] in
             await previous?.value
             guard let self, !Task.isCancelled else { return }
             self.speakingDelta(1)
             defer { self.speakingDelta(-1) }
-            let box = ConverterBox()
+            // The prelude (e.g. reply chime) plays while the voice is still being synthesized.
             var last: AVAudioPCMBuffer?
+            if let preludeBuffer {
+                Self.enqueue(preludeBuffer, on: player)
+                last = preludeBuffer
+            }
+            let box = ConverterBox()
             await self.voices.speak(text, voiceIndex: index) { pcm in
                 guard pcm.frameLength > 0 else { return }
                 if box.converter == nil || box.converter?.inputFormat != pcm.format {
@@ -146,6 +152,19 @@ final class SpatialAudio: AgentAudio {
     }
 
     /// A short tone from the agent's position. `high` for "sent", low for "you're facing me".
+    /// Fire-and-forget scheduling (kept synchronous so async callers don't wait for playback).
+    private static func enqueue(_ buffer: AVAudioPCMBuffer, on player: AVAudioPlayerNode) {
+        player.scheduleBuffer(buffer, completionHandler: nil)
+        if !player.isPlaying { player.play() }
+    }
+
+    func cue(_ cue: AudioCue, from id: UUID) {
+        guard let player = players[id], let buf = AudioConvert.cue(cue, format: format) else { return }
+        startEngine()
+        player.scheduleBuffer(buf, completionHandler: nil)
+        if !player.isPlaying { player.play() }
+    }
+
     func ping(from id: UUID, high: Bool) {
         guard let player = players[id], let tone = makeTone(frequency: high ? 990 : 660) else { return }
         startEngine()
