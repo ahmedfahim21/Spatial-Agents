@@ -29,6 +29,9 @@ final class SpatialAudio: AgentAudio {
     /// reply's sentences don't read as "stopped talking" in the gaps between them.
     private var speakingCount = 0
     var isSpeaking: Bool { speakingCount > 0 }
+    /// Each queued line's stop switch, so `silence` can drop all of them (lines wait on the
+    /// one before, so cancelling the last task alone would let the earlier ones play on).
+    private var stops: [UUID: [SpeechStop]] = [:]
     private func speakingDelta(_ d: Int) {
         let apply = {
             let was = self.speakingCount > 0
@@ -222,11 +225,16 @@ final class SpatialAudio: AgentAudio {
         let previous = speechTail[id]
         let target = format
         let preludeBuffer = prelude.flatMap { AudioConvert.cue($0, format: target) }
+        let stop = SpeechStop()
+        stops[id, default: []].append(stop)
         speakingDelta(1)
         speechTail[id] = Task { [weak self] in
-            defer { self?.speakingDelta(-1) }
+            defer {
+                self?.speakingDelta(-1)
+                DispatchQueue.main.async { self?.stops[id]?.removeAll { $0 === stop } }
+            }
             await previous?.value
-            guard let self, !Task.isCancelled else { return }
+            guard let self, !Task.isCancelled, !stop.isStopped else { return }
             // If this line closed the AirPods mic, hold playback until they're back in stereo.
             let releasedMic = await MainActor.run { self.beforeSpeaking?() ?? false }
             let gate = PlaybackGate(open: !releasedMic) { [weak self] in self?.enqueue($0, on: player) }
@@ -238,7 +246,7 @@ final class SpatialAudio: AgentAudio {
             if let preludeBuffer { gate.submit(preludeBuffer) }
             let box = ConverterBox()
             await self.voices.speak(text, voiceIndex: index) { pcm in
-                guard pcm.frameLength > 0 else { return }
+                guard pcm.frameLength > 0, !stop.isStopped else { return }
                 if box.converter == nil || box.converter?.inputFormat != pcm.format {
                     box.converter = AVAudioConverter(from: pcm.format, to: target)
                 }
@@ -247,13 +255,23 @@ final class SpatialAudio: AgentAudio {
             }
             await settle.value
             // Hold the queue until this line finishes playing (bounded, so it can't hang).
-            if gate.totalSeconds > 0, let marker = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: 1) {
+            if gate.totalSeconds > 0, !stop.isStopped, let marker = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: 1) {
                 marker.frameLength = 1
                 await waitForPlayback(timeout: gate.totalSeconds + 3) { done in
                     player.scheduleBuffer(marker, completionCallbackType: .dataPlayedBack) { _ in done() }
                 }
             }
         }
+    }
+
+    /// Cuts an agent off mid-sentence: lines still queued are dropped, and what's already
+    /// playing stops now.
+    func silence(id: UUID) {
+        stops[id]?.forEach { $0.stop() }
+        stops[id] = nil
+        guard let player = players[id] else { return }
+        player.stop()
+        if engine.isRunning { player.play() }
     }
 
     func cue(_ cue: AudioCue, from id: UUID) {
@@ -306,3 +324,11 @@ final class SpatialAudio: AgentAudio {
 
 private final class ConverterBox { var converter: AVAudioConverter? }
 private final class Flag { var value = false }
+
+/// Stops one line of speech, from any thread.
+final class SpeechStop: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stopped = false
+    var isStopped: Bool { lock.withLock { stopped } }
+    func stop() { lock.withLock { stopped = true } }
+}
