@@ -39,6 +39,14 @@ pnpm dev
 
 `pnpm build` typechecks and builds to `web/dist`.
 
+The turning AirPods are frames rendered from `web/public/airpods_prod_3.usdz`:
+
+```bash
+swift scripts/render-airpods.swift web/public/airpods_prod_3.usdz web/public/airpods 25 800
+```
+
+That model and the frames in `web/public/airpods/` are © Apple Inc. and aren't covered by this repo's MIT license.
+
 ## Paying shop agents: x402 on Hedera
 
 Public agents placed in the world can run a shop. Their owner adds a menu in Create; the agent gets
