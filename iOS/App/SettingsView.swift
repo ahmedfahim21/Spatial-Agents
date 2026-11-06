@@ -4,6 +4,7 @@ struct SettingsView: View {
     @Environment(MobileState.self) private var state
     @AppStorage("onboarded") private var onboarded = true
     @State private var arranging = false
+    @State private var confirmClearAll = false
 
     var body: some View {
         @Bindable var state = state
@@ -35,6 +36,17 @@ struct SettingsView: View {
                     Toggle("Demo mode", isOn: Binding(get: { loc.simulated != nil }, set: { state.setDemoMode($0) }))
                         .tint(.green)
                 } header: { Text("Location") } footer: { Text("Simulates your location for stage demos.") }
+                Section {
+                    Button("Clear all chats", role: .destructive) { confirmClearAll = true }
+                        .disabled(state.chattedAgents == 0)
+                        .confirmationDialog("Clear all chats?", isPresented: $confirmClearAll, titleVisibility: .visible) {
+                            Button("Clear all chats", role: .destructive) { state.clearAllChats() }
+                        } message: {
+                            Text("Every conversation goes back to just the agent's greeting. This can't be undone.")
+                        }
+                } header: { Text("Chats") } footer: {
+                    Text(state.chattedAgents == 0 ? "No chats yet." : "You've talked to \(state.chattedAgents) agent\(state.chattedAgents == 1 ? "" : "s"). Chats are kept only on this iPhone.")
+                }
                 WalletSection()
                 Section("Account") {
                     LabeledContent("Server", value: !Config.isConfigured ? "Not configured" : state.backendStatus.isEmpty ? "Connected" : "Offline")

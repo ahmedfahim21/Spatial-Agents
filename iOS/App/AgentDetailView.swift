@@ -7,6 +7,7 @@ struct AgentDetailView: View {
     let agentId: UUID
     @State private var finding = false
     @State private var confirmDelete = false
+    @State private var confirmClear = false
     @State private var menu: [CatalogItem] = []
     @State private var sales: [Sale] = []
     @State private var balance: Double?
@@ -88,6 +89,20 @@ struct AgentDetailView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(16)
                             .card()
+                        }
+                    }
+
+                    if state.hasChat(agent.id) {
+                        Button(role: .destructive) { confirmClear = true } label: {
+                            Text("Clear chat").frame(maxWidth: .infinity, minHeight: 48)
+                        }
+                        .buttonStyle(PressableStyle())
+                        .foregroundStyle(.red)
+                        .card()
+                        .confirmationDialog("Clear your chat with \(agent.name)?", isPresented: $confirmClear, titleVisibility: .visible) {
+                            Button("Clear chat", role: .destructive) { state.clearChat(agent.id) }
+                        } message: {
+                            Text("Everything but its greeting is removed from this iPhone.")
                         }
                     }
 

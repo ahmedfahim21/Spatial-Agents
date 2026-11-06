@@ -23,6 +23,16 @@ struct ConversationScreen: View {
                 Button("End") { state.endConversation() }
                     .buttonStyle(SecondaryButtonStyle(fullWidth: false))
                 Spacer()
+                Menu {
+                    Button(role: .destructive) {
+                        withAnimation(Motion.snappy) { state.clearChat(agent.id) }
+                    } label: { Label("Clear chat", systemImage: "trash") }
+                    .disabled(!state.hasChat(agent.id))
+                } label: {
+                    Image(systemName: "ellipsis").font(.system(size: 17, weight: .bold))
+                }
+                .buttonStyle(CircleButtonStyle())
+                .accessibilityLabel("More")
             }
             VStack(spacing: 6) {
                 BotView(agent: agent, mood: state.mood(for: agent), size: 64)

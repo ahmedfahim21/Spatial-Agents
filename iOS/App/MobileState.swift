@@ -688,6 +688,27 @@ final class MobileState {
         conversations[id, default: []].append(m)
     }
 
+    /// You've said something to this agent (more than its greeting is there).
+    func hasChat(_ id: UUID) -> Bool { messages(for: id).contains { $0.kind == .user } }
+
+    /// Agents you've talked to.
+    var chattedAgents: Int { conversations.keys.filter(hasChat).count }
+
+    private func greetingLine(_ a: Agent) -> String {
+        a.greeting.isEmpty ? "Hi, I'm \(a.name). What would you like to know?" : a.greeting
+    }
+
+    /// Clears a conversation back to just the agent's greeting (orders in it go too).
+    func clearChat(_ id: UUID) {
+        for m in messages(for: id) where m.kind == .order { orders[m.id] = nil }
+        if activeId == id { transcript = "" }
+        conversations[id] = agent(id).map { [ChatMessage(.agent, greetingLine($0))] }
+    }
+
+    func clearAllChats() {
+        for id in Array(conversations.keys) { clearChat(id) }
+    }
+
     private func insert(_ m: ChatMessage, before messageId: UUID, of id: UUID) {
         guard let i = conversations[id]?.firstIndex(where: { $0.id == messageId }) else { return post(m, to: id) }
         conversations[id]!.insert(m, at: i)
@@ -710,12 +731,12 @@ final class MobileState {
         ensurePlaced(a)
         haptics.tap(intensity: 0.9, sharpness: 0.5)
         let history = messages(for: a.id)
-        let firstTime = history.isEmpty
+        // Nothing said yet (new, or cleared back to its greeting): greet.
+        let fresh = !history.contains { $0.kind == .user }
         // Coming back after a while: say so, then carry on from the same conversation.
         let away = history.last.map { Date().timeIntervalSince($0.date) > 20 * 60 } ?? false
-        let line = firstTime ? (a.greeting.isEmpty ? "Hi, I'm \(a.name). What would you like to know?" : a.greeting)
-            : away ? "Welcome back. Where were we?" : "I'm listening."
-        if firstTime { post(ChatMessage(.agent, line), to: a.id) }
+        let line = fresh ? greetingLine(a) : away ? "Welcome back. Where were we?" : "I'm listening."
+        if fresh, history.last?.text != line { post(ChatMessage(.agent, line), to: a.id) }
         phase = .greeting
         audio.speak(line, from: a.id, prelude: .chime)
     }
