@@ -48,8 +48,8 @@ function Nav() {
     <header className="sticky top-0 z-20 bg-white/75 backdrop-blur-2xl backdrop-saturate-150">
       <nav className="mx-auto flex h-12 max-w-6xl items-center justify-between px-4 sm:px-6">
         <a href="#top" className="flex items-center gap-2 text-[15px]">
-          <Bot color="cyan" shape="circle" size={20} />
-          Agentsphere
+          <img src="/favicon.svg" alt="" width={24} height={24} />
+          Air Agents
         </a>
         <div className="flex items-center gap-6 text-[13px] text-ink/70">
           <a href="#airpods" className="hidden transition-colors hover:text-ink sm:block">AirPods</a>
@@ -112,7 +112,7 @@ function Gestures() {
       tone="white"
       label="Gestures"
       title="Your head is the interface."
-      intro="AirPods already know which way you're facing. Agentsphere reads that motion directly, so four small movements replace the mouse, the keyboard and the screen."
+      intro="AirPods already know which way you're facing. Air Agents reads that motion directly, so four small movements replace the mouse, the keyboard and the screen."
     >
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stage title="Turn to select" detail="Face an agent and its ring draws closed, with a soft tick from its direction.">
@@ -165,7 +165,7 @@ function IPhoneSection() {
     <Section
       id="iphone"
       tone="grey"
-      label="Agentsphere for iPhone"
+      label="Air Agents for iPhone"
       title="Agents that live with you, and agents that live in places."
       intro="The iPhone app takes the idea out of the door. Keep personal agents at your side, or leave one at a spot in the real world for you or anyone nearby to find."
     >
@@ -198,7 +198,7 @@ export function App() {
           tone="grey"
           label="AirPods"
           title="The sensors are already in your ears."
-          intro="Agentsphere needs no new hardware. AirPods know where your head is pointing and can place a voice anywhere around you. That's all it takes to put agents in the room."
+          intro="Air Agents needs no new hardware. AirPods know where your head is pointing and can place a voice anywhere around you. That's all it takes to put agents in the room."
         >
           <AirPods />
         </Section>
