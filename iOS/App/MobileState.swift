@@ -89,6 +89,8 @@ final class MobileState: ObservableObject {
     private var lastHeardAt = Date()
     private var listenStartedAt = Date()
     private var lastBeacon = Date.distantPast
+    private var lastWarmUp = Date.distantPast
+    private var lastThinkingPulse = Date.distantPast
     private var lastNearbyFetch: (at: Date, where: CLLocationCoordinate2D)?
     private var timer: Timer?
     private var bag: Set<AnyCancellable> = []
@@ -452,6 +454,11 @@ final class MobileState: ObservableObject {
             if let n = next, n != activeId {
                 audio.ping(from: n, high: false)
                 haptics.tap(intensity: 0.4, sharpness: 0.3)
+                // You're about to talk to someone: make sure the server is awake.
+                if Date().timeIntervalSince(lastWarmUp) > 60, Config.isConfigured {
+                    lastWarmUp = Date()
+                    backend.warmUp()
+                }
             }
         }
     }
@@ -475,6 +482,11 @@ final class MobileState: ObservableObject {
 
         // Conversation housekeeping.
         guard let active = activeId else { return }
+        // A quiet pulse from the agent while it thinks, so the wait never feels dead.
+        if phase == .thinking, Date().timeIntervalSince(lastThinkingPulse) > 1.3 {
+            lastThinkingPulse = Date()
+            audio.cue(.thinking, from: active)
+        }
         let looking = relativeAngle(active).map { abs($0) < 50 } ?? true
         if looking { lookAwaySince = nil } else if lookAwaySince == nil { lookAwaySince = Date() }
         let idle = phase == .listening && transcript.isEmpty

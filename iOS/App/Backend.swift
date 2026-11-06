@@ -141,6 +141,14 @@ final class Backend: @unchecked Sendable {
         return full
     }
 
+    /// Wakes the chat function (and its auth key cache) before you speak, to hide cold starts.
+    func warmUp() {
+        Task {
+            guard let req = try? await functionRequest("chat", body: ["warm": true]) else { return }
+            _ = try? await URLSession.shared.data(for: req)
+        }
+    }
+
     /// Raw PCM16 at 24 kHz in the given ElevenLabs voice.
     func speechStream(text: String, voiceId: String) async throws -> URLSession.AsyncBytes {
         let req = try await functionRequest("tts", body: ["text": text, "voice_id": voiceId])

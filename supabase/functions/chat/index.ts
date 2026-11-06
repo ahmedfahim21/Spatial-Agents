@@ -8,29 +8,50 @@ const MAX_TURNS = 24;
 const MAX_CHARS = 2000;
 
 type Turn = { role: "user" | "assistant"; content: string };
+type AgentRow = { id: string; owner_id: string; name: string; anchor: string; visibility: string; greeting: string; context: string };
+
+// Agents change rarely; keep them for 30 s per worker so a conversation doesn't hit the DB every turn.
+const agentCache = new Map<string, { row: AgentRow | null; at: number }>();
+async function loadAgent(db: ReturnType<typeof admin>, id: string): Promise<AgentRow | null> {
+  const hit = agentCache.get(id);
+  if (hit && Date.now() - hit.at < 30_000) return hit.row;
+  const { data, error } = await db
+    .from("agents")
+    .select("id, owner_id, name, anchor, visibility, greeting, context")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  agentCache.set(id, { row: data, at: Date.now() });
+  return data;
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
 
-  const db = admin();
-  const uid = await caller(req, db);
-  if (!uid) return json({ error: "Sign in first" }, 401);
-
-  let body: { agent_id?: string; messages?: Turn[] };
+  const t0 = performance.now();
+  const marks: Record<string, number> = {};
+  const mark = (k: string) => (marks[k] = Math.round(performance.now() - t0));
+  let body: { agent_id?: string; messages?: Turn[]; warm?: boolean };
   try {
     body = await req.json();
   } catch {
     return json({ error: "Invalid JSON" }, 400);
   }
+  // The app pings while you're still staring at an agent, so the worker is warm by the time you speak.
+  if (body.warm) return new Response(null, { status: 204, headers: cors });
   if (!body.agent_id) return json({ error: "agent_id is required" }, 400);
 
-  const { data: agent, error } = await db
-    .from("agents")
-    .select("id, owner_id, name, anchor, visibility, greeting, context")
-    .eq("id", body.agent_id)
-    .maybeSingle();
-  if (error) return json({ error: error.message }, 500);
+  // Check the caller and load the agent at the same time.
+  const db = admin();
+  let uid: string | null, agent: AgentRow | null;
+  try {
+    [uid, agent] = await Promise.all([caller(req, db), loadAgent(db, body.agent_id)]);
+  } catch (e) {
+    return json({ error: String(e) }, 500);
+  }
+  mark("auth_db");
+  if (!uid) return json({ error: "Sign in first" }, 401);
   // Private agents answer only their owner; don't reveal that they exist.
   if (!agent || (agent.visibility === "private" && agent.owner_id !== uid)) {
     return json({ error: "Agent not found" }, 404);
@@ -59,6 +80,7 @@ Deno.serve(async (req) => {
       messages: [{ role: "system", content: systemPrompt(agent) }, ...turns],
     }),
   });
+  mark("router_headers");
   if (!upstream.ok || !upstream.body) {
     const detail = await upstream.text().catch(() => "");
     console.error("0G router error", upstream.status, detail.slice(0, 500));
@@ -78,6 +100,7 @@ Deno.serve(async (req) => {
       const reader = upstream.body!.getReader();
       let buffer = "";
       const send = (s: string) => controller.enqueue(encoder.encode(s));
+      let firstText = true;
       try {
         while (true) {
           const { value, done } = await reader.read();
@@ -92,13 +115,19 @@ Deno.serve(async (req) => {
             if (payload === "[DONE]") continue;
             try {
               const text = JSON.parse(payload).choices?.[0]?.delta?.content;
-              if (text) send(`data: ${JSON.stringify({ text })}\n\n`);
+              if (text) {
+                if (firstText) { firstText = false; mark("first_token"); }
+                send(`data: ${JSON.stringify({ text })}\n\n`);
+              }
             } catch { /* keep-alive or partial line */ }
           }
         }
       } catch (e) {
         send(`data: ${JSON.stringify({ error: String(e) })}\n\n`);
       }
+      mark("done");
+      console.log("chat timing", JSON.stringify(marks));
+      send(`data: ${JSON.stringify({ timing: marks })}\n\n`);
       send("data: [DONE]\n\n");
       controller.close();
     },
@@ -106,7 +135,7 @@ Deno.serve(async (req) => {
   return new Response(stream, { headers: { ...cors, "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } });
 });
 
-function systemPrompt(a: { name: string; anchor: string; visibility: string; greeting: string; context: string }): string {
+function systemPrompt(a: AgentRow): string {
   const where = a.anchor === "geo"
     ? "You live at a real place; people walk up to you and talk to you through their AirPods."
     : "You travel with your owner, sitting around them in spatial audio.";

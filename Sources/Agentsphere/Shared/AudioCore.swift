@@ -88,6 +88,8 @@ enum AudioCue {
     case chime
     /// Falling two-note tone: something went wrong.
     case error
+    /// Soft low pulse, repeated while an agent is thinking.
+    case thinking
 }
 
 enum AudioBackendKind: String, CaseIterable, Identifiable {
@@ -332,6 +334,7 @@ enum AudioConvert {
         case .listening: notes = [(784, 0, 0.09), (1175, 0.1, 0.16)]; level = 0.22; decay = 9      // G5 → D6
         case .chime:     notes = [(1047, 0, 0.7), (1319, 0.13, 0.8)]; level = 0.2; decay = 4.5     // C6 → E6 bell
         case .error:     notes = [(659, 0, 0.14), (494, 0.15, 0.24)]; level = 0.22; decay = 7      // E5 → B4
+        case .thinking:  notes = [(392, 0, 0.22), (523, 0.09, 0.26)]; level = 0.07; decay = 9      // G4 + C5, quiet
         }
         let sr = format.sampleRate
         let total = notes.map { $0.start + $0.length }.max() ?? 0.3
