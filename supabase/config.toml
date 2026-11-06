@@ -4,8 +4,10 @@ project_id = "agentsphere"
 [auth]
 enable_anonymous_sign_ins = true
 
+# The gateway's JWT check doesn't understand the new publishable/secret keys;
+# both functions verify the caller's session themselves (caller() in _shared/common.ts).
 [functions.chat]
-verify_jwt = true
+verify_jwt = false
 
 [functions.tts]
-verify_jwt = true
+verify_jwt = false

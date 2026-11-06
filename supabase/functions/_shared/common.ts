@@ -9,9 +9,23 @@ export function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 }
 
-/** Service-role client: bypasses RLS, so every query here must check ownership itself. */
+/** Server key: the legacy service-role key if the project has one, else a new-style secret key. */
+function serverKey(): string {
+  const legacy = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (legacy) return legacy;
+  const explicit = Deno.env.get("AGENTSPHERE_SECRET_KEY");
+  if (explicit) return explicit;
+  try {
+    const keys = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}");
+    const first = keys.default ?? Object.values(keys)[0];
+    if (typeof first === "string") return first;
+  } catch { /* fall through */ }
+  throw new Error("No server key available to the function");
+}
+
+/** Admin client: bypasses RLS, so every query here must check ownership itself. */
 export function admin(): SupabaseClient {
-  return createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
+  return createClient(Deno.env.get("SUPABASE_URL")!, serverKey(), {
     auth: { persistSession: false },
   });
 }
