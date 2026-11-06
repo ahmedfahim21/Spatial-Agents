@@ -459,8 +459,10 @@ final class MobileState {
 
     /// Body agents (if "with me"), arrived geo agents, and the Find target's beacon.
     private func syncPlacement() {
+        assignZones()
         var want = Set<UUID>()
-        if withMe { for a in bodyAgents { want.insert(a.id) } }
+        // Body agents are heard only from a window.
+        if withMe { for a in bodyAgents where zones[a.id] != nil { want.insert(a.id) } }
         want.formUnion(arrived)
         if let f = findTargetId { want.insert(f) }
         if let active = activeId { want.insert(active) }
@@ -471,35 +473,49 @@ final class MobileState {
         }
         for id in want.subtracting(placed) { if let a = agent(id) { ensurePlaced(a) } }
 
-        assignZones()
         bodySlots = zones.filter { id, _ in bodyAgents.contains { $0.id == id } }
         updateScene()
     }
 
     // MARK: - Zones
 
-    /// Gives every body agent a zone (keeping existing ones), filling free zones in order.
+    /// Windows you emptied on purpose: new agents don't fill them.
+    private var emptiedWindows: Set<Zone> = Set((UserDefaults.standard.stringArray(forKey: "emptiedWindows") ?? []).compactMap(Zone.init))
+
+    /// Keeps each window's agent; a free window (that you didn't empty) takes the next agent
+    /// without one, oldest first.
     private func assignZones() {
         let ids = Set(bodyAgents.map(\.id))
         var next = zones.filter { ids.contains($0.key) }
-        for a in bodyAgents where next[a.id] == nil {
+        for a in bodyAgents.reversed() where next[a.id] == nil {
             let used = Set(next.values)
-            if let free = Zone.fillOrder.first(where: { !used.contains($0) }) { next[a.id] = free }
+            if let free = Zone.fillOrder.first(where: { !used.contains($0) && !emptiedWindows.contains($0) }) { next[a.id] = free }
         }
         if next != zones { zones = next; saveZones() }
     }
 
-    /// Puts an agent in a zone; whoever was there swaps into the agent's old zone.
-    func move(_ id: UUID, to zone: Zone) {
+    /// Puts an agent in a window (nil = empty it). Whoever was there leaves; if the agent
+    /// was in the other window, the two swap.
+    func setWindow(_ zone: Zone, to id: UUID?) {
         var next = zones
-        let old = next[id]
-        if let occupant = next.first(where: { $0.value == zone && $0.key != id })?.key {
-            next[occupant] = old
+        let occupant = next.first(where: { $0.value == zone })?.key
+        if let id {
+            if let old = next[id], let occupant, occupant != id { next[occupant] = old } else if let occupant { next[occupant] = nil }
+            next[id] = zone
+            emptiedWindows.remove(zone)
+        } else {
+            if let occupant { next[occupant] = nil }
+            emptiedWindows.insert(zone)
         }
-        next[id] = zone
-        zones = next.compactMapValues { $0 }
+        UserDefaults.standard.set(emptiedWindows.map(\.rawValue), forKey: "emptiedWindows")
+        zones = next
         saveZones()
         syncPlacement()
+    }
+
+    /// Takes an agent out of its window.
+    func removeFromWindow(_ id: UUID) {
+        if let zone = zones[id] { setWindow(zone, to: nil) }
     }
 
     func agent(in zone: Zone) -> Agent? {
@@ -507,7 +523,7 @@ final class MobileState {
         return bodyAgents.first { $0.id == id }
     }
 
-    /// Body agents that didn't fit in the six zones.
+    /// Body agents not in a window.
     var unzonedAgents: [Agent] { bodyAgents.filter { zones[$0.id] == nil } }
 
     private func saveZones() {

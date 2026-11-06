@@ -38,8 +38,8 @@ struct AgentDetailView: View {
                         SectionLabel("About")
                         VStack(spacing: 0) {
                             row("Voice", VoicePalette.voices[agent.voiceIndex].name)
-                            if let zone = state.zones[agent.id], !agent.isGeo {
-                                RowDivider(); row("Sits", zone.name)
+                            if !agent.isGeo {
+                                RowDivider(); windowRow(agent)
                             }
                             if agent.isGeo {
                                 RowDivider(); row("Reach", "\(Int(agent.radiusM)) m")
@@ -212,6 +212,44 @@ struct AgentDetailView: View {
         .foregroundStyle(.primary)
         .frame(maxWidth: .infinity, minHeight: 60)
         .card()
+    }
+
+    /// Which window it sits in. Choosing a taken window moves that agent out (or swaps).
+    private func windowRow(_ a: Agent) -> some View {
+        let current = state.zones[a.id]
+        return HStack {
+            Text("Window")
+            Spacer()
+            Menu {
+                ForEach(Zone.allCases) { zone in
+                    Button {
+                        state.setWindow(zone, to: a.id)
+                        state.preview(a.id)
+                    } label: {
+                        if current == zone {
+                            Label(zone.windowName, systemImage: "checkmark")
+                        } else if let other = state.agent(in: zone) {
+                            Text("\(zone.windowName) (replaces \(other.name))")
+                        } else {
+                            Text(zone.windowName)
+                        }
+                    }
+                }
+                if current != nil {
+                    Button(role: .destructive) { state.removeFromWindow(a.id) } label: {
+                        Label("Not in a window", systemImage: "xmark")
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(current?.name ?? "None")
+                    Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.semibold))
+                }
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 46)
     }
 
     private func row(_ label: String, _ value: String) -> some View {

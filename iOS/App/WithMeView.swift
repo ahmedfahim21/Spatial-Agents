@@ -38,19 +38,22 @@ struct WithMeView: View {
             }
             .navigationDestination(for: UUID.self) { AgentDetailView(agentId: $0) }
             .sheet(isPresented: $arranging) { SetupView() }
+            #if DEBUG
+            .onAppear { if UserDefaults.standard.string(forKey: "setupStep") != nil { arranging = true } }
+            #endif
         }
     }
 
     private var setupPrompt: some View {
         Button { arranging = true } label: {
             HStack(spacing: 14) {
-                Image(systemName: "square.grid.3x2")
+                Image(systemName: "rectangle.split.2x1")
                     .font(.title3)
                     .frame(width: 40, height: 40)
                     .background(Color(.systemGray5), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Set up your space").font(.headline)
-                    Text("Choose forward and place your agents around you.")
+                    Text("Choose forward, and who sits in your left and right windows.")
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
@@ -76,7 +79,7 @@ struct WithMeView: View {
                             }
                         }
                         Spacer(minLength: 8)
-                        Text(state.zones[agent.id]?.name ?? "Waiting")
+                        Text(state.zones[agent.id]?.name ?? "Not in a window")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -154,23 +157,15 @@ private struct Radar: View {
         .accessibilityLabel("Your agents around you")
     }
 
-    /// Eye-level agents sit on the ring; agents above you sit further in (seen from above,
-    /// something overhead is closer to you), slightly smaller.
+    /// Each window's agent sits on the ring at its side.
     private func placed(_ agent: Agent, _ zone: Zone) -> some View {
-        let r = zone.isUpper ? radius * 0.56 : radius
+        let r = radius
         let a = zone.azimuth * .pi / 180
-        let size: CGFloat = zone.isUpper ? 42 : 52
+        let size: CGFloat = 52
         let focused = state.focusedId == agent.id
         return ZStack {
             FocusRing(active: focused, diameter: size + 14, lineWidth: 3, showsTrack: false)
             BotView(agent: agent, mood: state.mood(for: agent), size: size, look: -sin(a))
-            if zone.isUpper {
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 9, weight: .bold))
-                    .padding(3)
-                    .background(Color(.secondarySystemGroupedBackground), in: Circle())
-                    .offset(x: size * 0.42, y: -size * 0.42)
-            }
         }
         .offset(x: sin(a) * r, y: -cos(a) * r)
         .animation(Motion.snappy, value: focused)

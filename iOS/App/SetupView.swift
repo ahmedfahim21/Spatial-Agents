@@ -1,12 +1,20 @@
 import SwiftUI
 
-/// Three steps: set forward, arrange your agents in the six zones, then try looking at them.
+/// Three steps: set forward, choose who sits in your left and right windows, then try looking at them.
 struct SetupView: View {
     enum Step: Int, CaseIterable { case forward, arrange, tryIt }
 
     @Environment(MobileState.self) private var state
     @Environment(\.dismiss) private var dismiss
-    @State private var step: Step = .forward
+    @State private var step: Step = {
+        #if DEBUG
+        // `-setupStep arrange` opens straight to a step, for checking screens without AirPods.
+        if let s = UserDefaults.standard.string(forKey: "setupStep"), let i = ["forward", "arrange", "try"].firstIndex(of: s) {
+            return Step(rawValue: i) ?? .forward
+        }
+        #endif
+        return .forward
+    }()
 
     var body: some View {
         NavigationStack {
@@ -88,23 +96,18 @@ struct SetupView: View {
     private var arrange: some View {
         VStack(spacing: 14) {
             VStack(spacing: 4) {
-                Text("Place your agents").font(.title2.bold())
-                Text("Drag them between zones. Tap one to hear it from there.")
+                Text("Choose your windows").font(.title2.bold())
+                Text("One agent on your left, one on your right. Front stays clear. Tap a window to choose who sits there.")
                     .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             .padding(.top, 18)
-            SpaceStage(editing: true).frame(height: 340)
+            SpaceStage(editing: true).frame(height: 260)
             if state.bodyAgents.isEmpty {
                 Text("You don't have any personal agents yet. Create one with “With me”.")
                     .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
             } else if !state.unzonedAgents.isEmpty {
-                Text("These don't fit yet. Drag one onto a zone to swap it in.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                HStack(spacing: 12) {
-                    ForEach(state.unzonedAgents) { a in
-                        BotView(agent: a, size: 44).draggable(a.id.uuidString) { BotView(agent: a, size: 44) }
-                    }
-                }
+                Text("Not in a window: \(state.unzonedAgents.map(\.name).formatted(.list(type: .and))). \(state.unzonedAgents.count == 1 ? "It waits" : "They wait") in Agents until you swap \(state.unzonedAgents.count == 1 ? "it" : "them") in.")
+                    .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             Spacer()
             Button("Next") { step = .tryIt }.buttonStyle(PrimaryButtonStyle())
@@ -121,7 +124,7 @@ struct SetupView: View {
                     .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             .padding(.top, 18)
-            SpaceStage().frame(height: 340)
+            SpaceStage().frame(height: 260)
             Text(state.agent(state.focusedId).map { "Looking at \($0.name)" } ?? " ")
                 .font(.headline)
                 .contentTransition(.opacity)
