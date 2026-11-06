@@ -29,6 +29,8 @@ struct Agent: Identifiable, Codable, Hashable {
     /// From nearby search.
     var isMine: Bool?
     var distanceM: Double?
+    /// The owner verified with World ID (nearby search only).
+    var verified: Bool?
 
     var isGeo: Bool { anchor == .geo || (anchor == nil && lat != nil) }
     var isPublic: Bool { visibility == .public }

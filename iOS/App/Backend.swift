@@ -133,8 +133,10 @@ final class Backend: @unchecked Sendable {
 
     struct Turn: Encodable { let role: String; let content: String }
 
-    /// Streams the agent's reply; `onText` gets each new piece. Returns the full reply.
-    func chat(agentId: UUID, turns: [Turn], onText: @escaping (String) -> Void) async throws -> String {
+    /// Streams the agent's reply; `onText` gets each new piece, `onOrder` each update of an
+    /// order the agent placed (shops only). Returns the full reply.
+    func chat(agentId: UUID, turns: [Turn], onText: @escaping (String) -> Void,
+              onOrder: @escaping (OrderUpdate) -> Void = { _ in }) async throws -> String {
         let req = try await functionRequest("chat", body: ["agent_id": agentId.uuidString, "messages": turns.map { ["role": $0.role, "content": $0.content] }])
         let (bytes, response) = try await URLSession.shared.bytes(for: req)
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
@@ -150,6 +152,10 @@ final class Backend: @unchecked Sendable {
             guard let obj = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any] else { continue }
             if let err = obj["error"] as? String { throw BackendError(message: err) }
             if let t = obj["text"] as? String { full += t; onText(t) }
+            if let o = obj["order"], let data = try? JSONSerialization.data(withJSONObject: o),
+               let update = try? decoder.decode(OrderUpdate.self, from: data) {
+                onOrder(update)
+            }
         }
         return full
     }
@@ -172,16 +178,88 @@ final class Backend: @unchecked Sendable {
         return bytes
     }
 
-    private func functionRequest(_ name: String, body: [String: Any]) async throws -> URLRequest {
+    private func functionRequest(_ name: String, body: [String: Any]? = nil) async throws -> URLRequest {
         let token = try await token()
         var req = URLRequest(url: Config.supabaseURL.appendingPathComponent("functions/v1/\(name)"))
-        req.httpMethod = "POST"
+        req.httpMethod = body == nil ? "GET" : "POST"
         req.timeoutInterval = 60
         req.setValue(Config.supabaseAnonKey, forHTTPHeaderField: "apikey")
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        if let body { req.httpBody = try JSONSerialization.data(withJSONObject: body) }
         return req
+    }
+
+    /// Calls a function and decodes its JSON answer (errors become BackendError).
+    private func function<T: Decodable>(_ name: String, body: [String: Any]? = nil, timeout: TimeInterval = 60) async throws -> T {
+        var req = try await functionRequest(name, body: body)
+        req.timeoutInterval = timeout
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try check(response, data)
+        return try decoder.decode(T.self, from: data)
+    }
+
+    // MARK: - Payments
+
+    /// Turns payments on for one of your public agents and saves its catalog (empty = off).
+    func saveCatalog(agentId: UUID, items: [CatalogItem]) async throws -> [CatalogItem] {
+        struct Saved: Decodable { let items: [CatalogItem] }
+        let body: [String: Any] = [
+            "agent_id": agentId.uuidString,
+            "items": items.map { i -> [String: Any] in
+                var row: [String: Any] = ["name": i.name, "price_usdc": i.priceUsdc, "note": i.note]
+                if let id = i.id { row["id"] = id.uuidString }
+                return row
+            },
+        ]
+        return try await (function("merchant", body: body, timeout: 90) as Saved).items
+    }
+
+    func catalog(agentId: UUID) async throws -> [CatalogItem] {
+        let data = try await rest("catalog_items?select=id,name,note,price_usdc&agent_id=eq.\(agentId.uuidString)&active=eq.true&order=position",
+                                  method: "GET")
+        return try decoder.decode([CatalogItem].self, from: data)
+    }
+
+    /// Has your wallet agent buy something. Within your limits it pays straight away;
+    /// above them it comes back as `checkpoint` until you approve it with World ID.
+    func pay(agentId: UUID, itemId: UUID, qty: Int, approvalId: String? = nil) async throws -> OrderUpdate {
+        var body: [String: Any] = ["agent_id": agentId.uuidString, "item_id": itemId.uuidString, "qty": qty]
+        if let approvalId { body["approval_id"] = approvalId }
+        var req = try await functionRequest("pay", body: body)
+        req.timeoutInterval = 90
+        let (data, _) = try await URLSession.shared.data(for: req)
+        // pay answers with a status even when it refuses (denied, failed).
+        if let update = try? decoder.decode(OrderUpdate.self, from: data) { return update }
+        throw BackendError(message: "Unexpected answer from your wallet")
+    }
+
+    func wallet() async throws -> WalletInfo { try await function("pay") }
+
+    func saveLimits(autoLimit: Double, dailyBudget: Double) async throws {
+        struct Ack: Decodable {}
+        let _: Ack = try await function("pay/settings", body: ["auto_limit_usdc": autoLimit, "daily_budget_usdc": dailyBudget])
+    }
+
+    /// Where to send you to verify with World ID (`verify_shop`) or approve a purchase (`checkpoint`).
+    func worldStart(purpose: String, approvalId: String? = nil) async throws -> URL {
+        struct Start: Decodable { let url: String }
+        var body: [String: Any] = ["purpose": purpose]
+        if let approvalId { body["approval_id"] = approvalId }
+        let start: Start = try await function("world/start", body: body)
+        guard let url = URL(string: start.url) else { throw BackendError(message: "Bad World ID link") }
+        return url
+    }
+
+    /// Your own World ID verification, if you have one.
+    func worldIdentity() async throws -> WorldIdentity? {
+        let data = try await rest("world_identities?select=acr,verified_at", method: "GET")
+        return try decoder.decode([WorldIdentity].self, from: data).first
+    }
+
+    func shopProfile(agentId: UUID) async throws -> ShopProfile? {
+        let data = try await rest("rpc/shop_profile", method: "POST", json: ["p_agent": agentId.uuidString])
+        return try decoder.decode([ShopProfile].self, from: data).first
     }
 
     private func check(_ response: URLResponse, _ data: Data) throws {
