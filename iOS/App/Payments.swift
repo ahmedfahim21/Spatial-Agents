@@ -250,7 +250,7 @@ struct VerifiedBadge: View {
         let seal = Image(systemName: "checkmark.seal.fill")
             .font(.system(size: size, weight: .semibold))
             .foregroundStyle(.white, .blue)
-            .accessibilityLabel("Verified human")
+            .accessibilityLabel("Verified by human")
         if tappable {
             Button { showing = true } label: { seal.padding(4).contentShape(Rectangle()) }
                 .buttonStyle(PressableStyle())
@@ -295,8 +295,8 @@ struct VerifiedSheet: View {
                         .font(.system(size: 52, weight: .semibold))
                         .foregroundStyle(.white, .blue)
                         .symbolEffect(.bounce, value: profile?.verified)
-                    Text("Verified human").font(.title2.bold())
-                    Text("The person behind \(agent.name) proved with World ID that they're a real, unique human.")
+                    Text("Verified by human").font(.title2.bold())
+                    Text("\(agent.name) is run by a real, unique human, verified with World ID.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
