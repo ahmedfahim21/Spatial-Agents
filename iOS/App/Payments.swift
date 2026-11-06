@@ -42,8 +42,8 @@ struct OrderUpdate: Decodable, Sendable {
 }
 
 /// An order in a conversation, drawn as a card under the agent's reply.
-struct OrderCard: Equatable {
-    enum Status: Equatable { case paying, paid, needsApproval, approving, denied, cancelled, failed }
+struct OrderCard: Equatable, Codable {
+    enum Status: String, Equatable, Codable { case paying, paid, needsApproval, approving, denied, cancelled, failed }
     var status: Status
     var itemName: String
     var qty: Int

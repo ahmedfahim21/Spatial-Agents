@@ -53,9 +53,10 @@ final class MobileState {
     private(set) var activeId: UUID?
     private(set) var phase: ConversationPhase = .idle
     private(set) var transcript = ""
-    var conversations: [UUID: [ChatMessage]] = [:]
+    var conversations: [UUID: [ChatMessage]] = [:] { didSet { saveConversationsSoon() } }
     /// Orders placed in conversations, by the id of their `.order` message.
-    private(set) var orders: [UUID: OrderCard] = [:]
+    private(set) var orders: [UUID: OrderCard] = [:] { didSet { saveConversationsSoon() } }
+    @ObservationIgnored private var conversationSave: Task<Void, Never>?
     /// Your World ID verification (a verified human), once you've done it.
     private(set) var worldIdentity: WorldIdentity?
     @ObservationIgnored private let worldAuth = WorldAuth()
@@ -150,6 +151,7 @@ final class MobileState {
         voices.primary = ServerVoice()
         voices.onStatus = { [weak self] s in self?.voiceStatus = s }
 
+        (conversations, orders) = ConversationStore.load()
         if let saved = UserDefaults.standard.dictionary(forKey: "zones") as? [String: String] {
             zones = Dictionary(uniqueKeysWithValues: saved.compactMap { k, v in
                 guard let id = UUID(uuidString: k), let z = Zone(rawValue: v) else { return nil }
@@ -659,6 +661,18 @@ final class MobileState {
 
     func messages(for id: UUID) -> [ChatMessage] { conversations[id] ?? [] }
 
+    /// Writes conversations to disk a moment after they stop changing (a streaming reply
+    /// changes them many times a second). Sample data stays in memory.
+    private func saveConversationsSoon() {
+        guard !offline else { return }
+        conversationSave?.cancel()
+        conversationSave = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard let self, !Task.isCancelled else { return }
+            ConversationStore.save(self.conversations, orders: self.orders)
+        }
+    }
+
     private func post(_ m: ChatMessage, to id: UUID) {
         conversations[id, default: []].append(m)
     }
@@ -673,8 +687,12 @@ final class MobileState {
         failing.remove(a.id)
         ensurePlaced(a)
         haptics.tap(intensity: 0.9, sharpness: 0.5)
-        let firstTime = messages(for: a.id).isEmpty
-        let line = firstTime ? (a.greeting.isEmpty ? "Hi, I'm \(a.name). What would you like to know?" : a.greeting) : "I'm listening."
+        let history = messages(for: a.id)
+        let firstTime = history.isEmpty
+        // Coming back after a while: say so, then carry on from the same conversation.
+        let away = history.last.map { Date().timeIntervalSince($0.date) > 20 * 60 } ?? false
+        let line = firstTime ? (a.greeting.isEmpty ? "Hi, I'm \(a.name). What would you like to know?" : a.greeting)
+            : away ? "Welcome back. Where were we?" : "I'm listening."
         if firstTime { post(ChatMessage(.agent, line), to: a.id) }
         phase = .greeting
         audio.speak(line, from: a.id, prelude: .chime)
@@ -763,6 +781,8 @@ final class MobileState {
             default: break
             }
         }
+        // The recent part of a long conversation is what matters to the reply.
+        if turns.count > 40 { turns.removeFirst(turns.count - 40) }
         while turns.first?.role == "assistant" { turns.removeFirst() }
 
         let placeholder = ChatMessage(.agent, "")
@@ -1046,6 +1066,8 @@ func normalize360(_ a: Double) -> Double {
 extension MobileState {
     func loadSampleWorld(scene: String?) {
         offline = true
+        conversations = [:]
+        orders = [:]
         let here = CLLocationCoordinate2D(latitude: 19.0760, longitude: 72.8777)
         func agent(_ name: String, _ color: BotColor, _ shape: BotShape, greeting: String = "",
                    metres: Double? = nil, bearing: Double = 0, pricing: String = "free", mine: Bool = false,

@@ -36,6 +36,7 @@
 		B39D2E980E57456BC3915EE8 /* PositionFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2BB318E4F929F2C2DC23056E /* PositionFilter.swift */; };
 		C668412E830D38E1B763F8CA /* GeoMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5241CFF9F58D3214E5B9A117 /* GeoMath.swift */; };
 		CD6D387AF35D4BDEE9693852 /* FindView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E864C79FC8DB3608130090D1 /* FindView.swift */; };
+		D1AEBEF216C21E8CCED77494 /* ConversationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CED646D675DD68032EC19A40 /* ConversationStore.swift */; };
 		D29AA90A3E710CC3F1D20A80 /* SharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD2856D24BAF26F6DBFE7524 /* SharedModels.swift */; };
 		EB2DBF1AFFADA94ACB3C5DD4 /* Voices.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5EEEDAAAF5FE57E1D86DDDE /* Voices.swift */; };
 		EEEDA978A2259D2593FC2B75 /* EditAgentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77C10D05D32227210F0AD331 /* EditAgentView.swift */; };
@@ -76,6 +77,7 @@
 		A9044571EEF85C5469B0623E /* HeadTracker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeadTracker.swift; sourceTree = "<group>"; };
 		B57B94C786F17730C8DE2D42 /* AudioSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSession.swift; sourceTree = "<group>"; };
 		B69F15A31B9B49E666E03F9C /* SpatialAudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpatialAudio.swift; sourceTree = "<group>"; };
+		CED646D675DD68032EC19A40 /* ConversationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationStore.swift; sourceTree = "<group>"; };
 		D5EEEDAAAF5FE57E1D86DDDE /* Voices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Voices.swift; sourceTree = "<group>"; };
 		DD2856D24BAF26F6DBFE7524 /* SharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedModels.swift; sourceTree = "<group>"; };
 		E864C79FC8DB3608130090D1 /* FindView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FindView.swift; sourceTree = "<group>"; };
@@ -142,6 +144,7 @@
 				21F270FF6631D57EC3A4C7D4 /* Backend.swift */,
 				3152B5494B1B57B6F4E97B9E /* Bot.swift */,
 				6B42CE28424418C4C9ADB2EF /* Config.swift */,
+				CED646D675DD68032EC19A40 /* ConversationStore.swift */,
 				6D29CE04B8CBB324C3342373 /* ConversationView.swift */,
 				24455A322521E16DC888C5AE /* CreateView.swift */,
 				3FA977F61ABB583C188104C5 /* Design.swift */,
@@ -254,6 +257,7 @@
 				A6D60F5186BC713DD5708C4D /* Backend.swift in Sources */,
 				48E1658AF8070914CEF75CE5 /* Bot.swift in Sources */,
 				AE08EFA932A5B527FA4E77DA /* Config.swift in Sources */,
+				D1AEBEF216C21E8CCED77494 /* ConversationStore.swift in Sources */,
 				AADB242144BAC2BF4DAF2381 /* ConversationView.swift in Sources */,
 				8627F88C7AAABFAE310662DA /* CreateView.swift in Sources */,
 				093BC186EC04C794D5EF3898 /* Design.swift in Sources */,
