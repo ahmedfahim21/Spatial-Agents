@@ -137,7 +137,7 @@ final class MobileState: ObservableObject {
     }
 
     func refreshMine() async {
-        guard Config.isConfigured else { backendStatus = "Backend not configured"; return }
+        guard Config.isConfigured else { return }
         do {
             myAgents = try await backend.myAgents()
             backendStatus = ""
