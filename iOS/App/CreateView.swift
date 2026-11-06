@@ -25,6 +25,9 @@ struct CreateView: View {
     enum Field: Hashable { case name, greeting, context }
 
     @Environment(MobileState.self) private var state
+    @Environment(\.dismiss) private var dismiss
+    /// Called with the new agent once it's saved (Create is a sheet over Agents).
+    var onCreated: ((Agent) -> Void)?
     @State private var name = ""
     @State private var color: BotColor = .cyan
     @State private var shape: BotShape = .circle
@@ -128,8 +131,12 @@ struct CreateView: View {
             }
             .animation(Motion.snappy, value: flavor)
             .scrollDismissesKeyboard(.interactively)
-            .navigationTitle("Create")
+            .navigationTitle("New agent")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }.disabled(saving)
+                }
                 if field != nil {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Done") { field = nil }.fontWeight(.semibold)
@@ -227,6 +234,7 @@ struct CreateView: View {
                     }
                 }
                 state.haptics.arrived()
+                if let onCreated { onCreated(a); saving = false; return }
                 withAnimation(Motion.snappy) { result = .success(done) }
                 name = ""; greeting = ""; context = ""; place = nil
                 acceptsPayments = false; catalog = [CatalogDraft()]
@@ -239,7 +247,7 @@ struct CreateView: View {
 }
 
 /// Where a placed agent will live: a live preview, the arrival radius, and the map picker.
-private struct PlaceSection: View {
+struct PlaceSection: View {
     @Environment(MobileState.self) private var state
     @Binding var radius: Double
     @Binding var place: CLLocationCoordinate2D?
@@ -285,7 +293,7 @@ private struct PlaceSection: View {
 }
 
 /// The eight colours; a ring slides to the chosen one.
-private struct ColorRow: View {
+struct ColorRow: View {
     @Binding var selection: BotColor
     @Namespace private var ring
 
@@ -315,7 +323,7 @@ private struct ColorRow: View {
 }
 
 /// The five shapes, drawn in the chosen colour; a soft tile slides to the chosen one.
-private struct ShapeRow: View {
+struct ShapeRow: View {
     let color: BotColor
     @Binding var selection: BotShape
     @Namespace private var tile
