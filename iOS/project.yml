@@ -42,5 +42,7 @@ schemes:
         Agentsphere: all
     run:
       config: Debug
+      # Run without the debugger so nothing pauses the app on the phone.
+      debugEnabled: false
     archive:
       config: Release
