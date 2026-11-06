@@ -18,10 +18,13 @@ struct ExploreMap: View {
 
     var body: some View {
         Map(position: $camera, selection: $selected) {
+            // Your dot, with a cone for where you're facing (relative to the map's rotation).
+            let facing = pointing.map { normalize360($0 - mapHeading) }
             if let sim = state.location.simulated {
-                Annotation("You", coordinate: sim) { YouDot() }
+                Annotation("You", coordinate: sim, anchor: .center) { YouDot(facing: facing).equatable() }
+                    .annotationTitles(.hidden)
             } else {
-                UserAnnotation()
+                UserAnnotation(anchor: .center) { _ in YouDot(facing: facing).equatable() }
             }
             ForEach(state.nearby.filter { $0.coordinate != nil }) { a in
                 MapCircle(center: a.coordinate!, radius: a.radiusM)
@@ -46,6 +49,10 @@ struct ExploreMap: View {
             MapUserLocationButton()
             MapCompass()
         }
+        .onMapCameraChange(frequency: .continuous) { ctx in
+            let h = YouDot.step(ctx.camera.heading)
+            if h != mapHeading { mapHeading = h }
+        }
         // Start at street level around you, once we know where you are.
         .onChange(of: state.location.hasFix, initial: true) { _, hasFix in
             guard hasFix, !framed, let here = state.location.coordinate else { return }
@@ -55,6 +62,14 @@ struct ExploreMap: View {
     }
 
     @State private var framed = false
+    /// The map's rotation, in steps (see `YouDot.step`).
+    @State private var mapHeading: Double = 0
+
+    /// Where you're facing, degrees from true north: your head when AirPods are tracking,
+    /// otherwise the phone. In steps, so the dot isn't re-measured on every sensor tick.
+    private var pointing: Double? {
+        (state.headWorld ?? state.location.heading).map(YouDot.step)
+    }
 
     /// The still version of a mood, for the map.
     private func still(_ mood: BotMood) -> BotMood {
@@ -106,11 +121,40 @@ private struct MapBot: View, Equatable {
 }
 
 /// Your position in demo mode (the real one uses MapKit's own dot).
-private struct YouDot: View {
+/// You on the map: a blue dot, and a soft cone toward where you're facing.
+private struct YouDot: View, Equatable {
+    /// Degrees clockwise from the top of the screen; nil = unknown (no cone).
+    let facing: Double?
+
+    /// Rounds a direction to 4° steps: smooth enough to read, rare enough to redraw.
+    static func step(_ degrees: Double) -> Double { (normalize360(degrees) / 4).rounded() * 4 }
+
     var body: some View {
-        Circle().fill(Color.blue).frame(width: 16, height: 16)
-            .overlay(Circle().stroke(.white, lineWidth: 3))
-            .shadow(color: .black.opacity(0.2), radius: 3)
+        ZStack {
+            if let facing {
+                Cone()
+                    .fill(RadialGradient(colors: [Color.blue.opacity(0.45), Color.blue.opacity(0)],
+                                         center: .center, startRadius: 6, endRadius: 46))
+                    .rotationEffect(.degrees(facing))
+            }
+            Circle().fill(Color.blue).frame(width: 16, height: 16)
+                .overlay(Circle().stroke(.white, lineWidth: 3))
+                .shadow(color: .black.opacity(0.2), radius: 3)
+        }
+        .frame(width: 96, height: 96)
+        .allowsHitTesting(false)
+    }
+
+    /// A 70° wedge from the centre, pointing up.
+    private struct Cone: Shape {
+        func path(in rect: CGRect) -> Path {
+            let c = CGPoint(x: rect.midX, y: rect.midY)
+            var p = Path()
+            p.move(to: c)
+            p.addArc(center: c, radius: rect.width / 2, startAngle: .degrees(-90 - 35), endAngle: .degrees(-90 + 35), clockwise: false)
+            p.closeSubpath()
+            return p
+        }
     }
 }
 
