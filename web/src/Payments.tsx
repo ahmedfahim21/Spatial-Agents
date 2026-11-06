@@ -180,7 +180,7 @@ export function Payments() {
           </div>
           <ol className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
             {wire.map(([code, what], i) => (
-              <li key={code} className={`rounded-2xl p-3 transition-colors duration-300 ${at >= i ? "bg-ink text-white" : "bg-[#f5f5f7] text-secondary"}`}>
+              <li key={code} className={`rounded-2xl p-3 transition-colors duration-300 ${at >= i ? "bg-ink text-white" : "bg-white text-secondary"}`}>
                 <p className="break-words font-mono text-[11px] leading-4">{code}</p>
                 <p className={`mt-1 text-[12px] leading-4 ${at >= i ? "text-white/70" : ""}`}>{what}</p>
               </li>

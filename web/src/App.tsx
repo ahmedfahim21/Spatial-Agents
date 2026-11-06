@@ -4,7 +4,6 @@ import { AirPods } from "./AirPods";
 import { Architecture } from "./Architecture";
 import { Bot } from "./Bot";
 import { Phone } from "./Frames";
-import { MacDemo } from "./MacDemo";
 import { Payments } from "./Payments";
 import { CreateScreen, ExploreScreen, FindScreen, ToolsScreen, WithMeScreen } from "./Screens";
 
@@ -55,7 +54,6 @@ function Nav() {
         <div className="flex items-center gap-6 text-[13px] text-ink/70">
           <a href="#airpods" className="hidden transition-colors hover:text-ink sm:block">AirPods</a>
           <a href="#gestures" className="hidden transition-colors hover:text-ink sm:block">Gestures</a>
-          <a href="#mac" className="hidden transition-colors hover:text-ink sm:block">Mac</a>
           <a href="#iphone" className="hidden transition-colors hover:text-ink sm:block">iPhone</a>
           <a href="#shops" className="hidden transition-colors hover:text-ink sm:block">Shops</a>
           <a href="#built" className="hidden transition-colors hover:text-ink sm:block">How it's built</a>
@@ -129,11 +127,11 @@ function Gestures() {
             <span className="absolute bottom-0 size-6 rounded-full bg-card shadow" />
           </div>
         </Stage>
-        <Stage title="Nod to say yes" detail="Wake the agent you're looking at, or approve what it's asking for.">
+        <Stage title="Nod to say yes" detail="Wake the agent you're looking at and start talking.">
           <div className="loop-nod"><Bot color="green" shape="squircle" size={76} mood="awake" /></div>
           <Check className="ml-4" size={26} aria-hidden />
         </Stage>
-        <Stage title="Shake to say no" detail="Deny a request, or end the conversation and let the agent sleep.">
+        <Stage title="Shake to say no" detail="End the conversation and let the agent go back to sleep.">
           <div className="loop-shake"><Bot color="pink" shape="hexagon" size={76} mood="ended" /></div>
           <X className="ml-4" size={26} aria-hidden />
         </Stage>
@@ -145,33 +143,6 @@ function Gestures() {
             ))}
           </div>
         </Stage>
-      </div>
-    </Section>
-  );
-}
-
-function MacSection() {
-  return (
-    <Section
-      id="mac"
-      tone="grey"
-      label="Agentsphere for Mac"
-      title="Never come back to a stuck Claude Code session."
-      intro="You start several sessions, walk away, and one hits a permission prompt. With Agentsphere it asks in your ear from where it sits, and you answer with your head. Try it: the buttons stand in for a nod and a shake."
-    >
-      <MacDemo />
-      <div className="mt-14 grid gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
-        {[
-          ["Your existing sessions", "Find live and recent Claude Code sessions and resume them, or start a new one."],
-          ["Only what matters", "Read-only tools like Read, Grep and Glob are allowed automatically."],
-          ["Silence is a no", "No answer within 60 seconds and the request is denied."],
-          ["One nod, one call", "Each decision is bound to a SHA-256 hash of the tool name and arguments."],
-        ].map(([t, d]) => (
-          <div key={t}>
-            <p className="text-[17px] tracking-tight">{t}</p>
-            <p className="mt-1 text-[15px] leading-[1.45] text-secondary">{d}</p>
-          </div>
-        ))}
       </div>
     </Section>
   );
@@ -193,7 +164,7 @@ function IPhoneSection() {
   return (
     <Section
       id="iphone"
-      tone="white"
+      tone="grey"
       label="Agentsphere for iPhone"
       title="Agents that live with you, and agents that live in places."
       intro="The iPhone app takes the idea out of the door. Keep personal agents at your side, or leave one at a spot in the real world for you or anyone nearby to find."
@@ -232,12 +203,11 @@ export function App() {
           <AirPods />
         </Section>
         <Gestures />
-        <MacSection />
         <IPhoneSection />
         <Section
           id="shops"
           compact
-          tone="grey"
+          tone="white"
           label="Agent shops"
           title="Order out loud. Your wallet agent pays."
           intro="Shop agents have their own Hedera wallet. Yours pays them in USDC over x402, and you only step in for large amounts. Tap the menu, then try the coffee beans."
@@ -247,7 +217,7 @@ export function App() {
         <Section
           id="built"
           compact
-          tone="white"
+          tone="grey"
           label="How it's built"
           title="Follow a request through the system."
           intro="Native audio and motion on the device, with a thin backend for models, voices and payments. Pick a journey, or click any box."

@@ -42,18 +42,3 @@ export function Phone({ children, tab, width = 262, background = "#f2f2f7" }: { 
     </div>
   );
 }
-
-/** A macOS window. */
-export function MacWindow({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="overflow-hidden rounded-xl bg-[#f6f6f6] shadow-[0_40px_80px_-24px_rgba(0,0,0,0.35),0_0_0_0.5px_rgba(0,0,0,0.2)]">
-      <div className="relative flex h-9 items-center gap-2 border-b border-black/10 bg-[#ececec] px-3.5">
-        <span className="size-3 rounded-full bg-[#ff5f57]" />
-        <span className="size-3 rounded-full bg-[#febc2e]" />
-        <span className="size-3 rounded-full bg-[#28c840]" />
-        <span className="absolute inset-x-0 text-center text-[13px] text-secondary">{title}</span>
-      </div>
-      {children}
-    </div>
-  );
-}

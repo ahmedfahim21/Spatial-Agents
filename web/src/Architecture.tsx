@@ -4,34 +4,23 @@ import { useEffect, useState } from "react";
 type Node = { x: number; y: number; label: string; note: string };
 
 const nodes = {
-  airpods: { x: 90, y: 270, label: "AirPods", note: "Head pose from the motion sensors, and spatial audio back. Each agent is a sound source moved opposite your head, so it stays put." },
-  mac: { x: 300, y: 120, label: "Mac app", note: "Holds your Claude Code sessions around you and runs a local server that keeps each tool call open until you answer." },
-  iphone: { x: 300, y: 400, label: "iPhone app", note: "Personal and placed agents, the map, phone tools and your orders. Calendar, Health and the rest run here." },
-  claude: { x: 540, y: 60, label: "Claude Code", note: "Each turn runs claude -p with --resume in the agent's folder, so the conversation continues." },
-  chat: { x: 540, y: 180, label: "chat", note: "One conversational turn. Streams the reply, passes tool requests to the phone, and turns a hidden order line into a payment." },
-  stt: { x: 540, y: 270, label: "stt", note: "Speech to text for what you say to an agent." },
-  tts: { x: 540, y: 360, label: "tts", note: "Speaks a line in the agent's voice, so the app ships no key." },
-  pay: { x: 540, y: 470, label: "pay", note: "Your custodial wallet agent. Pays within your limits, or creates an approval that a fresh World ID check must clear." },
-  zerog: { x: 780, y: 225, label: "0G Router", note: "Chat models, chosen per agent, and Whisper Large v3 for speech." },
-  eleven: { x: 780, y: 360, label: "ElevenLabs", note: "Streaming voices for each agent." },
-  shop: { x: 780, y: 470, label: "shop", note: "The x402 seller. Answers 402 with the price, then verifies and settles the signed payment." },
-  world: { x: 780, y: 560, label: "World ID", note: "The human checkpoint for purchases above your limit." },
-  hedera: { x: 1010, y: 470, label: "Hedera", note: "USDC settles here, and every payment is written to an HCS topic as an audit log." },
+  airpods: { x: 90, y: 210, label: "AirPods", note: "Head pose from the motion sensors, and spatial audio back. Each agent is a sound source moved opposite your head, so it stays put." },
+  iphone: { x: 300, y: 210, label: "iPhone app", note: "Personal and placed agents, the map, phone tools and your orders. Calendar, Health and the rest run here." },
+  chat: { x: 540, y: 70, label: "chat", note: "One conversational turn. Streams the reply, passes tool requests to the phone, and turns a hidden order line into a payment." },
+  stt: { x: 540, y: 160, label: "stt", note: "Speech to text for what you say to an agent." },
+  tts: { x: 540, y: 250, label: "tts", note: "Speaks a line in the agent's voice, so the app ships no key." },
+  pay: { x: 540, y: 360, label: "pay", note: "Your custodial wallet agent. Pays within your limits, or creates an approval that a fresh World ID check must clear." },
+  zerog: { x: 780, y: 115, label: "0G Router", note: "Chat models, chosen per agent, and Whisper Large v3 for speech." },
+  eleven: { x: 780, y: 250, label: "ElevenLabs", note: "Streaming voices for each agent." },
+  shop: { x: 780, y: 360, label: "shop", note: "The x402 seller. Answers 402 with the price, then verifies and settles the signed payment." },
+  world: { x: 780, y: 450, label: "World ID", note: "The human checkpoint for purchases above your limit." },
+  hedera: { x: 1010, y: 360, label: "Hedera", note: "USDC settles here, and every payment is written to an HCS topic as an audit log." },
 } satisfies Record<string, Node>;
 
 type Id = keyof typeof nodes;
 type Step = [from: Id, to: Id, text: string];
 
 const flows: { name: string; steps: Step[] }[] = [
-  {
-    name: "Approve a tool call",
-    steps: [
-      ["claude", "mac", "A PreToolUse hook sends the pending tool call to the app and waits"],
-      ["mac", "airpods", "It speaks a one-line summary from that agent's position"],
-      ["airpods", "mac", "Your nod or shake, read from head motion"],
-      ["mac", "claude", "Allow or deny, bound to a hash of that exact call"],
-    ],
-  },
   {
     name: "Talk to an agent",
     steps: [
@@ -113,7 +102,7 @@ export function Architecture() {
             role="tab"
             aria-selected={i === flow}
             onClick={() => { setFlow(i); setStep(0); setPlaying(true); setPicked(null); }}
-            className={`pressable h-9 cursor-pointer rounded-full px-4 text-[14px] ${i === flow ? "bg-ink text-white" : "bg-white"}`}
+            className={`pressable h-9 cursor-pointer rounded-full px-4 text-[14px] ${i === flow ? "bg-ink text-white" : "bg-fill"}`}
           >
             {f.name}
           </button>
@@ -121,13 +110,13 @@ export function Architecture() {
       </div>
 
       <div className="mt-4 grid items-start gap-4 lg:grid-cols-[1.65fr_1fr]">
-      <div className="flex items-center justify-center gap-2 rounded-2xl bg-white p-4 text-[15px] md:hidden">
+      <div className="flex items-center justify-center gap-2 rounded-2xl bg-[#f5f5f7] p-4 text-[15px] md:hidden">
         <span className="rounded-xl bg-ink px-3 py-2 text-white">{nodes[from].label}</span>
         <ArrowRight size={18} aria-hidden />
         <span className="rounded-xl bg-ink px-3 py-2 text-white">{nodes[to].label}</span>
       </div>
       <div className="hidden md:block">
-        <svg viewBox="0 0 1100 610" className="w-full" role="group" aria-label={`Diagram: ${flows[flow].name}`}>
+        <svg viewBox="0 0 1100 490" className="w-full" role="group" aria-label={`Diagram: ${flows[flow].name}`}>
           <defs>
             <marker id="tip" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
               <path d="M0 0 L10 5 L0 10z" fill="#000" />
@@ -163,7 +152,7 @@ export function Architecture() {
                   width={w}
                   height={h}
                   rx="14"
-                  fill={live ? "#000" : "#fff"}
+                  fill={live ? "#000" : "#f5f5f7"}
                   stroke={picked === id ? "#36D1DC" : "none"}
                   strokeWidth="3"
                   style={{ transition: "fill 200ms" }}
@@ -182,7 +171,7 @@ export function Architecture() {
               <button
                 type="button"
                 onClick={() => { setStep(i); setPlaying(false); setPicked(null); }}
-                className={`flex w-full cursor-pointer gap-2.5 rounded-lg px-2 py-1.5 text-left text-[14px] leading-5 transition-colors ${i === step ? "bg-white text-ink" : "text-secondary"}`}
+                className={`flex w-full cursor-pointer gap-2.5 rounded-lg px-2 py-1.5 text-left text-[14px] leading-5 transition-colors ${i === step ? "bg-[#f5f5f7] text-ink" : "text-secondary"}`}
               >
                 <span className="tabular-nums">{i + 1}</span>
                 {text}
@@ -190,7 +179,7 @@ export function Architecture() {
             </li>
           ))}
         </ol>
-        <div className="rounded-2xl bg-white p-4">
+        <div className="rounded-2xl bg-[#f5f5f7] p-4">
           <p className="text-[17px]">{info.label}</p>
           <p className="mt-1 text-[14px] leading-5 text-secondary">{info.note}</p>
         </div>
