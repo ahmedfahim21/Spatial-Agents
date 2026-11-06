@@ -31,6 +31,9 @@ struct ChatMessage: Identifiable, Equatable {
 final class HeadMotion: ObservableObject {
     @Published var yaw: Double = 0
     @Published var pitch: Double = 0
+    /// 0...1 while you hold your gaze on an agent (iPhone). Lives here so only the views
+    /// that draw it redraw 10×/s, not every screen.
+    @Published var stare: Double = 0
 }
 
 /// An instruction heard hands-free, sent after a short window unless you shake.

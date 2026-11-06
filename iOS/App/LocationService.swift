@@ -19,6 +19,7 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
     }
 
     private let manager = CLLocationManager()
+    private var filter = PositionFilter()
 
     /// Indoors or a poor fix: turn on the safeguards (wider arrival, direction lock).
     var isPoorFix: Bool { simulated == nil && accuracy > 15 }
@@ -26,8 +27,10 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
     override init() {
         super.init()
         manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyBest
-        manager.distanceFilter = 1
+        // Best-for-navigation also fuses Wi-Fi and Bluetooth indoors. The filter wants every
+        // sample (it weighs them by accuracy), so no distance filter.
+        manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
+        manager.distanceFilter = kCLDistanceFilterNone
         manager.headingFilter = 1
         manager.activityType = .fitness
         authorization = manager.authorizationStatus
@@ -40,11 +43,13 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
     }
 
     nonisolated func locationManager(_ m: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let l = locations.last, l.horizontalAccuracy >= 0 else { return }
         Task { @MainActor in
             guard self.simulated == nil else { return }
-            self.coordinate = l.coordinate
-            self.accuracy = l.horizontalAccuracy
+            for l in locations {
+                guard let fix = self.filter.add(l) else { continue }
+                self.coordinate = fix
+                self.accuracy = l.horizontalAccuracy
+            }
         }
     }
 

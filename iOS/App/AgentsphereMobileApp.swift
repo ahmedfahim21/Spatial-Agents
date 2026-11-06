@@ -18,11 +18,11 @@ struct RootView: View {
     @EnvironmentObject var state: MobileState
 
     var body: some View {
-        TabView {
-            Tab("Explore", systemImage: "location.north.circle") { ExploreView(location: state.location) }
-            Tab("With me", systemImage: "person.wave.2") { AroundMeView() }
-            Tab("Create", systemImage: "plus.circle") { CreateView() }
-            Tab("Settings", systemImage: "gearshape") { SettingsView(location: state.location) }
+        TabView(selection: $state.screen) {
+            Tab("Explore", systemImage: "location.north.circle", value: .explore) { ExploreView(location: state.location) }
+            Tab("With me", systemImage: "person.wave.2", value: .withMe) { AroundMeView() }
+            Tab("Create", systemImage: "plus.circle", value: .create) { CreateView() }
+            Tab("Settings", systemImage: "gearshape", value: .settings) { SettingsView(location: state.location) }
         }
         .tint(.cyan)
     }

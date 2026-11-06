@@ -5,6 +5,9 @@ import SwiftUI
 struct ExploreView: View {
     @EnvironmentObject var state: MobileState
     @ObservedObject private var loc: LocationService
+    enum Mode: String, CaseIterable { case map = "Map", list = "List" }
+    @State private var mode: Mode = .map
+    @State private var path: [UUID] = []
 
     init(location: LocationService) { _loc = ObservedObject(wrappedValue: location) }
 
@@ -13,7 +16,45 @@ struct ExploreView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
+            Group {
+                if mode == .map {
+                    ExploreMap(location: loc) { path.append($0) }
+                        .safeAreaInset(edge: .top) { mapStatus }
+                } else {
+                    list
+                }
+            }
+            .navigationTitle("Explore")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Picker("View", selection: $mode) { ForEach(Mode.allCases, id: \.self) { Text($0.rawValue) } }
+                        .pickerStyle(.segmented).frame(width: 160)
+                }
+            }
+            .navigationDestination(for: UUID.self) { id in FindView(agentId: id, location: loc) }
+            .task { await state.refreshNearby(force: true) }
+        }
+    }
+
+    /// The same notices as the list, compact over the map.
+    @ViewBuilder private var mapStatus: some View {
+        let notices = VStack(alignment: .leading, spacing: 6) { statusSection }
+            .font(.footnote)
+        notices
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.ultraThinMaterial)
+            .opacity(hasNotice ? 1 : 0)
+    }
+
+    private var hasNotice: Bool {
+        !Config.isConfigured || loc.coordinate == nil || !state.backendStatus.isEmpty || loc.simulated != nil
+            || loc.isPoorFix || loc.authorization == .denied
+    }
+
+    private var list: some View {
             List {
                 statusSection
                 if !sorted.isEmpty {
@@ -28,11 +69,7 @@ struct ExploreView: View {
                         .listRowBackground(Color.clear)
                 }
             }
-            .navigationTitle("Explore")
-            .navigationDestination(for: UUID.self) { id in FindView(agentId: id, location: loc) }
             .refreshable { await state.refreshNearby(force: true) }
-            .task { await state.refreshNearby(force: true) }
-        }
     }
 
     @ViewBuilder private var statusSection: some View {
@@ -144,8 +181,7 @@ struct FindView: View {
 
     private func arrivedHeader(_ a: Agent) -> some View {
         VStack(spacing: 10) {
-            AgentOrb(agent: a, size: 84, stare: state.focusedId == a.id ? state.stareProgress : 0,
-                     active: state.activeId == a.id, focused: state.focusedId == a.id)
+            StareOrb(agent: a, size: 84)
                 .padding(.top, 12)
             if state.activeId == a.id {
                 PhaseLabel(phase: state.phase)

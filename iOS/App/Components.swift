@@ -106,6 +106,39 @@ struct ConversationView: View {
     private func sendTyped() {
         state.send(typed, to: agent.id)
         typed = ""
+        typing = false
+    }
+}
+
+/// An agent's orb with its live stare ring. Only this small view watches the stare,
+/// so the screen around it doesn't redraw 10 times a second.
+struct StareOrb: View {
+    @EnvironmentObject var state: MobileState
+    @EnvironmentObject var head: HeadMotion
+    let agent: Agent
+    var size: CGFloat = 62
+    var showStare = true
+
+    var body: some View {
+        AgentOrb(agent: agent, size: size,
+                 stare: showStare && state.focusedId == agent.id ? head.stare : 0,
+                 active: state.activeId == agent.id,
+                 focused: state.focusedId == agent.id)
+    }
+}
+
+/// Sits right above the keyboard (via safeAreaInset) whenever a field is being edited.
+struct KeyboardDoneBar: View {
+    let done: () -> Void
+    var body: some View {
+        HStack {
+            Spacer()
+            Button(action: done) { Text("Done").bold().padding(.horizontal, 6) }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+        }
+        .padding(.horizontal).padding(.vertical, 6)
+        .background(.bar)
     }
 }
 

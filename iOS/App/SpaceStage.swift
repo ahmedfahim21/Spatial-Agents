@@ -46,7 +46,7 @@ struct SpaceStage: View {
             ZStack {
                 if let a = agent {
                     AgentOrb(agent: a, size: 62,
-                             stare: state.focusedId == a.id && !editing ? state.stareProgress : 0,
+                             stare: state.focusedId == a.id && !editing ? head.stare : 0,
                              active: state.activeId == a.id,
                              focused: state.focusedId == a.id)
                         .draggable(a.id.uuidString) { AgentOrb(agent: a, size: 62) }

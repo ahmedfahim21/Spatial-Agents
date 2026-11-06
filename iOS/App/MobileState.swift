@@ -35,7 +35,14 @@ final class MobileState: ObservableObject {
     @Published private(set) var arrived: Set<UUID> = []
 
     @Published private(set) var focusedId: UUID?
-    @Published private(set) var stareProgress: Double = 0
+    var stareProgress: Double {
+        get { head.stare }
+        set { if head.stare != newValue { head.stare = newValue } }
+    }
+    /// Which tab is showing. Looking at agents only does anything on the screens that show them.
+    enum Screen { case explore, withMe, create, settings }
+    @Published var screen: Screen = .explore { didSet { if oldValue != screen { updateFocus() } } }
+    private var lookingEnabled: Bool { screen == .explore || screen == .withMe }
     @Published private(set) var activeId: UUID?
     @Published private(set) var phase: ConversationPhase = .idle
     @Published private(set) var transcript = ""
@@ -438,7 +445,9 @@ final class MobileState: ObservableObject {
     private func updateFocus() {
         // Body agents: how far your gaze is from them, sideways and up/down.
         // Geo agents: sideways only (you're often looking down at the phone while finding).
-        let candidates = talkable.compactMap { a -> (UUID, Double)? in
+        // On Create or Settings, your gaze is on the phone: no pings, no waking agents.
+        let pool = lookingEnabled ? talkable : talkable.filter { $0.id == activeId }
+        let candidates = pool.compactMap { a -> (UUID, Double)? in
             guard let az = relativeAngle(a.id) else { return nil }
             guard let el = relativeElevation(a.id) else { return (a.id, abs(az)) }
             return (a.id, (az * az + el * el * 1.2).squareRoot())
