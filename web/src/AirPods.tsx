@@ -51,9 +51,6 @@ export function AirPods() {
   const target = useRef(0);
   target.current = Math.max(-1, Math.min(1, yaw / 60));
   const frames = useFrames();
-  const [canAR, setCanAR] = useState(false);
-
-  useEffect(() => setCanAR(document.createElement("a").relList.supports("ar")), []);
 
   // Eases toward where you're facing, so the steps between frames don't show.
   useEffect(() => {
@@ -106,12 +103,6 @@ export function AirPods() {
             style={{ opacity: frames ? 1 : 0 }}
           />
         </div>
-        {canAR && (
-          <a rel="ar" href="/airpods_prod_3.usdz" className="pressable absolute bottom-4 flex h-9 items-center rounded-full bg-ink px-4 text-[14px] text-white">
-            <img src="/apple-touch-icon.png" alt="" className="hidden" />
-            View in AR
-          </a>
-        )}
       </div>
       <div className="grid gap-6 px-6 pb-8 text-center sm:grid-cols-3 sm:px-10">
         {[
