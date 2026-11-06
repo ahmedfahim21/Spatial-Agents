@@ -36,6 +36,12 @@ final class HeadTracker {
     /// While true (talking to an agent, a permission waiting) the ring never re-centers.
     var isEngaged: () -> Bool = { false }
     private let follower = BodyFollower()
+    /// How far (degrees) and how long (seconds) the head must stay turned before the
+    /// ring re-centers on the new direction. Wider and slower suits a calibrated layout.
+    func configureRecenter(angle: Double, delay: Double) {
+        follower.recenterAngle = angle
+        follower.recenterDelay = delay
+    }
     private var lastFollowState = ""
     /// 0.5 (stiff) ... 2 (twitchy). Scales the speed and size a nod or shake needs.
     var sensitivity: Double {
@@ -125,6 +131,8 @@ final class HeadTracker {
 /// Short glances never move it, and nothing moves while you're engaged with an agent.
 final class BodyFollower {
     var enabled = true
+    var recenterAngle = 45.0
+    var recenterDelay = 6.0
     private(set) var state = ""
     private var bodyYaw: Double?
     private var lastTime: Double?
@@ -161,9 +169,9 @@ final class BodyFollower {
             offSince = nil
             state = "walking"
         } else {
-            if abs(off) > 45 {
+            if abs(off) > recenterAngle {
                 if offSince == nil { offSince = time }
-                if let since = offSince, time - since > 6 { recentering = true }
+                if let since = offSince, time - since > recenterDelay { recentering = true }
             } else if !recentering {
                 offSince = nil
             }

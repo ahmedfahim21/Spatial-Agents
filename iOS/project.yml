@@ -35,3 +35,12 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.abhisheksatpathy.agentsphere
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+schemes:
+  Agentsphere:
+    build:
+      targets:
+        Agentsphere: all
+    run:
+      config: Debug
+    archive:
+      config: Release

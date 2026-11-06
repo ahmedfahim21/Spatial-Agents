@@ -1,17 +1,19 @@
 import SwiftUI
 
-/// Your body-anchored agents in a ring around your head. Look at one for 3 seconds to talk.
+/// Your personal agents, arranged in your space. Look at one for 3 seconds to talk.
 struct AroundMeView: View {
     @EnvironmentObject var state: MobileState
-    @EnvironmentObject var head: HeadMotion
-    @State private var showing: Agent?
+    @State private var showSetup = false
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                radar
-                    .frame(height: 300)
-                    .padding(.top)
+            VStack(spacing: 14) {
+                if !state.calibrated && !state.bodyAgents.isEmpty {
+                    setupBanner
+                }
+                SpaceStage()
+                    .frame(height: state.activeId == nil ? 340 : 230)
+                    .animation(.easeInOut, value: state.activeId)
                 if let a = state.agent(state.activeId) {
                     VStack(spacing: 4) {
                         Text(a.name).font(.headline)
@@ -21,82 +23,49 @@ struct AroundMeView: View {
                 } else {
                     PhaseLabel(phase: .idle)
                     if !state.hasHeadData {
-                        Text(state.trackingStatus).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal)
+                        Text(state.trackingStatus).font(.footnote).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center).padding(.horizontal)
                     }
-                    List {
-                        ForEach(state.bodyAgents) { a in
-                            Button { state.wake(a) } label: {
-                                HStack(spacing: 12) {
-                                    AgentOrb(agent: a, size: 38)
-                                    VStack(alignment: .leading) {
-                                        Text(a.name).foregroundStyle(.primary)
-                                        Text(a.greeting).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                    }
-                                }
-                            }
-                        }
-                        .onDelete { idx in
-                            let agents = idx.map { state.bodyAgents[$0] }
-                            Task { for a in agents { await state.delete(a) } }
-                        }
-                        if state.bodyAgents.isEmpty {
-                            Text("No agents with you yet. Create a personal agent and choose “With me”.")
-                                .font(.footnote).foregroundStyle(.secondary)
-                        }
+                    if state.bodyAgents.isEmpty {
+                        Text("No agents with you yet. Create a personal agent and choose “With me”.")
+                            .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center).padding()
                     }
-                    .listStyle(.insetGrouped)
+                    Spacer()
                 }
             }
+            .padding(.horizontal)
             .navigationTitle("With me")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { state.recenter() } label: { Image(systemName: "scope") }
+                    Button { showSetup = true } label: { Image(systemName: "square.grid.3x2") }
+                        .accessibilityLabel("Arrange your space")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { state.calibrateForward() } label: { Image(systemName: "scope") }
+                        .accessibilityLabel("Set forward to where you're looking")
                 }
                 if state.activeId != nil {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button("End") { state.endConversation() }
-                    }
+                    ToolbarItem(placement: .topBarLeading) { Button("End") { state.endConversation() } }
                 }
             }
+            .sheet(isPresented: $showSetup) { SetupView().environmentObject(state).environmentObject(state.head) }
         }
     }
 
-    /// Top-down view in your body's frame: agents stay put around you and the cone shows
-    /// where your head is pointing, so turning your head visibly sweeps the cone.
-    private var radar: some View {
-        GeometryReader { geo in
-            let size = min(geo.size.width, geo.size.height)
-            let r = size * 0.38
-            ZStack {
-                Circle().stroke(Color.white.opacity(0.08), lineWidth: 1).frame(width: r * 2, height: r * 2)
-                // Focus cone straight ahead.
-                Path { p in
-                    p.move(to: CGPoint(x: size / 2, y: size / 2))
-                    p.addArc(center: CGPoint(x: size / 2, y: size / 2), radius: r * 1.15,
-                             startAngle: .degrees(-90 - 22), endAngle: .degrees(-90 + 22), clockwise: false)
-                    p.closeSubpath()
+    private var setupBanner: some View {
+        Button { showSetup = true } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "sparkles").font(.title3)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Set up your space").font(.headline)
+                    Text("Choose forward and place your agents around you.").font(.caption).foregroundStyle(.secondary)
                 }
-                .fill(RadialGradient(colors: [Color.cyan.opacity(state.hasHeadData ? 0.4 : 0.12), .clear], center: .center, startRadius: 0, endRadius: r * 1.15))
-                .frame(width: size, height: size)
-                .rotationEffect(.degrees(head.yaw))
-                .animation(.linear(duration: 0.08), value: head.yaw)
-                Image(systemName: "person.fill").font(.title).foregroundStyle(.white.opacity(0.8))
-                Text(state.hasHeadData ? String(format: "%.0f°", head.yaw) : "No head tracking")
-                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                    .offset(y: r * 1.25)
-                ForEach(state.talkable) { a in
-                    if let rel = state.relativeAngle(a.id).map({ $0 + head.yaw }) {
-                        AgentOrb(agent: a, size: 52,
-                                 stare: state.focusedId == a.id ? state.stareProgress : 0,
-                                 active: state.activeId == a.id, focused: state.focusedId == a.id)
-                            .position(x: size / 2 + CGFloat(sin(rel * .pi / 180)) * r,
-                                      y: size / 2 - CGFloat(cos(rel * .pi / 180)) * r)
-                            .onTapGesture { state.wake(a) }
-                    }
-                }
+                Spacer()
+                Image(systemName: "chevron.right").foregroundStyle(.secondary)
             }
-            .frame(width: size, height: size)
-            .frame(maxWidth: .infinity)
+            .padding(14)
+            .background(Color.cyan.opacity(0.14), in: RoundedRectangle(cornerRadius: 16))
         }
+        .buttonStyle(.plain)
     }
 }

@@ -41,6 +41,18 @@ final class MobileState: ObservableObject {
     @Published private(set) var transcript = ""
     @Published var conversations: [UUID: [ChatMessage]] = [:]
 
+    /// Where each body-anchored agent sits around you.
+    @Published private(set) var zones: [UUID: Zone] = [:]
+    /// The user has set their forward direction and arranged their agents.
+    @Published private(set) var calibrated = UserDefaults.standard.bool(forKey: "calibrated")
+    /// Head pitch when looking straight ahead (AirPods sit differently on everyone).
+    @Published private(set) var pitchZero = UserDefaults.standard.double(forKey: "pitchZero")
+    /// Head pitch relative to straight ahead.
+    var headPitch: Double { head.pitch - pitchZero }
+
+    /// While arranging agents, looking at one shouldn't wake it.
+    @Published var arranging = false
+
     @Published var trackingStatus = "Starting…"
     @Published private(set) var hasHeadData = false
     @Published var lastGesture: HeadGesture?
@@ -69,7 +81,7 @@ final class MobileState: ObservableObject {
 
     private var placed: Set<UUID> = []
     /// Body agents' fixed slots around you.
-    private var bodySlots: [UUID: Double] = [:]
+    private var bodySlots: [UUID: Zone] = [:]
     /// Geo agents' bearings, frozen when close or when GPS is poor so they don't jitter.
     private var lockedBearing: [UUID: Double] = [:]
     private var lastFocusAt = Date()
@@ -88,6 +100,15 @@ final class MobileState: ObservableObject {
         voices.primary = ServerVoice()
         voices.onStatus = { [weak self] s in self?.voiceStatus = s }
 
+        if let saved = UserDefaults.standard.dictionary(forKey: "zones") as? [String: String] {
+            zones = Dictionary(uniqueKeysWithValues: saved.compactMap { k, v in
+                guard let id = UUID(uuidString: k), let z = Zone(rawValue: v) else { return nil }
+                return (id, z)
+            })
+        }
+        // A calibrated layout shouldn't swing round because you looked at a side agent
+        // for a while: only re-center after a clear, long turn (or when walking).
+        tracker.configureRecenter(angle: 80, delay: 10)
         tracker.onStatus = { [weak self] s in
             print("Agentsphere: tracking status: \(s)")
             self?.trackingStatus = s
@@ -318,38 +339,110 @@ final class MobileState: ObservableObject {
         }
         for id in want.subtracting(placed) { if let a = agent(id) { ensurePlaced(a) } }
 
-        // Body agents take fixed slots, front first, so the first one is right ahead.
-        let slots: [Double] = [0, -70, 70, -140, 140, 180, -35, 35]
-        let body = bodyAgents
-        bodySlots = Dictionary(uniqueKeysWithValues: body.enumerated().map { ($1.id, slots[$0 % slots.count]) })
+        assignZones()
+        bodySlots = zones.filter { id, _ in bodyAgents.contains { $0.id == id } }
         updateScene()
+    }
+
+    // MARK: - Zones
+
+    /// Gives every body agent a zone (keeping existing ones), filling free zones in order.
+    private func assignZones() {
+        let ids = Set(bodyAgents.map(\.id))
+        var next = zones.filter { ids.contains($0.key) }
+        for a in bodyAgents where next[a.id] == nil {
+            let used = Set(next.values)
+            if let free = Zone.fillOrder.first(where: { !used.contains($0) }) { next[a.id] = free }
+        }
+        if next != zones { zones = next; saveZones() }
+    }
+
+    /// Puts an agent in a zone; whoever was there swaps into the agent's old zone.
+    func move(_ id: UUID, to zone: Zone) {
+        var next = zones
+        let old = next[id]
+        if let occupant = next.first(where: { $0.value == zone && $0.key != id })?.key {
+            next[occupant] = old
+        }
+        next[id] = zone
+        zones = next.compactMapValues { $0 }
+        saveZones()
+        syncPlacement()
+    }
+
+    func agent(in zone: Zone) -> Agent? {
+        guard let id = zones.first(where: { $0.value == zone })?.key else { return nil }
+        return bodyAgents.first { $0.id == id }
+    }
+
+    /// Body agents that didn't fit in the six zones.
+    var unzonedAgents: [Agent] { bodyAgents.filter { zones[$0.id] == nil } }
+
+    private func saveZones() {
+        UserDefaults.standard.set(Dictionary(uniqueKeysWithValues: zones.map { ($0.key.uuidString, $0.value.rawValue) }), forKey: "zones")
+    }
+
+    /// "This is forward": the current head direction becomes the front of your space.
+    func calibrateForward() {
+        tracker.recenter()
+        pitchZero = head.pitch
+        UserDefaults.standard.set(pitchZero, forKey: "pitchZero")
+        worldOffset = nil
+        calibrateWorld()
+        updateScene()
+    }
+
+    func finishSetup() {
+        calibrated = true
+        UserDefaults.standard.set(true, forKey: "calibrated")
+    }
+
+    /// The agent says where it is, from where it is.
+    func preview(_ id: UUID) {
+        guard let a = agent(id), let z = zones[id] else { return }
+        ensurePlaced(a)
+        updateScene()
+        audio.speak("I'm \(a.name), \(z.spoken).", from: id, prelude: .chime)
     }
 
     /// Angle of an agent relative to where your head points (0 = straight ahead, + = right).
     func relativeAngle(_ id: UUID) -> Double? {
-        if let slot = bodySlots[id], withMe { return normalizeAngle(slot - yawBody) }
+        if let zone = bodySlots[id], withMe { return normalizeAngle(zone.azimuth - yawBody) }
         guard let a = agent(id), a.isGeo, let b = bearing(to: a), let h = headWorld else { return nil }
         return normalizeAngle(b - h)
     }
 
+    /// Height of an agent relative to where your head points (body agents only).
+    func relativeElevation(_ id: UUID) -> Double? {
+        guard let zone = bodySlots[id], withMe else { return nil }
+        return zone.elevation - headPitch
+    }
+
     /// Agents you can stare at right now.
     var talkable: [Agent] {
-        (withMe ? bodyAgents : []) + nearby.filter { arrived.contains($0.id) }
+        (withMe ? bodyAgents.filter { zones[$0.id] != nil } : []) + nearby.filter { arrived.contains($0.id) }
     }
 
     private func updateScene() {
         for id in placed {
-            if let rel = relativeAngle(id) { audio.setAzimuth(id: id, azimuth: rel) }
+            guard let rel = relativeAngle(id) else { continue }
+            audio.setDirection(id: id, azimuth: rel, elevation: relativeElevation(id) ?? 0)
         }
         updateFocus()
     }
 
     private func updateFocus() {
-        let candidates = talkable.compactMap { a in relativeAngle(a.id).map { (a.id, abs($0)) } }
+        // Body agents: how far your gaze is from them, sideways and up/down.
+        // Geo agents: sideways only (you're often looking down at the phone while finding).
+        let candidates = talkable.compactMap { a -> (UUID, Double)? in
+            guard let az = relativeAngle(a.id) else { return nil }
+            guard let el = relativeElevation(a.id) else { return (a.id, abs(az)) }
+            return (a.id, (az * az + el * el * 1.2).squareRoot())
+        }
         var next: UUID?
-        if let cur = focusedId, let c = candidates.first(where: { $0.0 == cur }), c.1 < 32 {
+        if let cur = focusedId, let c = candidates.first(where: { $0.0 == cur }), c.1 < 34 {
             next = cur   // hysteresis: keep focus until clearly looking elsewhere
-        } else if let best = candidates.filter({ $0.1 < 22 }).min(by: { $0.1 < $1.1 }) {
+        } else if let best = candidates.filter({ $0.1 < 24 }).min(by: { $0.1 < $1.1 }) {
             next = best.0
         }
         if next != focusedId {
@@ -372,7 +465,7 @@ final class MobileState: ObservableObject {
         beaconTick()
 
         // Stare to wake: 3 s of steady attention.
-        if let f = focusedId, f != activeId {
+        if let f = focusedId, f != activeId, !arranging {
             let p = min(1, Date().timeIntervalSince(lastFocusAt) / 3)
             if p != stareProgress { stareProgress = p }
             if p >= 1, let a = agent(f) { wake(a) }

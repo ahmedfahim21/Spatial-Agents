@@ -11,6 +11,7 @@ final class SpatialAudio: AgentAudio {
 
     private var players: [UUID: AVAudioPlayerNode] = [:]
     private var azimuths: [UUID: Double] = [:]
+    private var elevations: [UUID: Double] = [:]
     private var voiceIndex: [UUID: Int] = [:]
     /// Each agent speaks one line at a time; a new line waits for the previous one.
     private var speechTail: [UUID: Task<Void, Never>] = [:]
@@ -147,6 +148,7 @@ final class SpatialAudio: AgentAudio {
         engine.detach(player)
         players[id] = nil
         azimuths[id] = nil
+        elevations[id] = nil
         voiceIndex[id] = nil
         speechTail[id]?.cancel()
         speechTail[id] = nil
@@ -162,14 +164,22 @@ final class SpatialAudio: AgentAudio {
         updatePositions()
     }
 
+    /// Direction with height: elevation in degrees, + = above ear level.
+    func setDirection(id: UUID, azimuth: Double, elevation: Double) {
+        azimuths[id] = azimuth
+        elevations[id] = elevation
+        updatePositions()
+    }
+
     private func updatePositions() {
         for (id, az) in azimuths {
             let rel = (az - headYaw) * .pi / 180
-            // Listener faces -Z; +X is to the right.
+            let el = (elevations[id] ?? 0) * .pi / 180
+            // Listener faces -Z; +X is to the right; +Y is up.
             players[id]?.position = AVAudio3DPoint(
-                x: Float(sin(rel)) * radius,
-                y: 0,
-                z: -Float(cos(rel)) * radius
+                x: Float(sin(rel) * cos(el)) * radius,
+                y: Float(sin(el)) * radius,
+                z: -Float(cos(rel) * cos(el)) * radius
             )
         }
     }
