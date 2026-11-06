@@ -1,0 +1,11 @@
+# Minimal config for `supabase link` / `supabase db push` / `supabase functions deploy`.
+project_id = "agentsphere"
+
+[auth]
+enable_anonymous_sign_ins = true
+
+[functions.chat]
+verify_jwt = true
+
+[functions.tts]
+verify_jwt = true
