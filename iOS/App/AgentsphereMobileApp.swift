@@ -19,10 +19,10 @@ struct RootView: View {
 
     var body: some View {
         TabView {
-            Tab("Explore", systemImage: "location.north.circle") { ExploreView() }
+            Tab("Explore", systemImage: "location.north.circle") { ExploreView(location: state.location) }
             Tab("With me", systemImage: "person.wave.2") { AroundMeView() }
             Tab("Create", systemImage: "plus.circle") { CreateView() }
-            Tab("Settings", systemImage: "gearshape") { SettingsView() }
+            Tab("Settings", systemImage: "gearshape") { SettingsView(location: state.location) }
         }
         .tint(.cyan)
     }

@@ -152,6 +152,11 @@ final class SpatialAudio: AgentAudio {
         speechTail[id] = nil
     }
 
+    /// Per-agent loudness, 0...1 (e.g. a beacon that grows as you approach).
+    func setGain(id: UUID, gain: Double) {
+        players[id]?.volume = Float(max(0, min(1, gain)))
+    }
+
     func setAzimuth(id: UUID, azimuth: Double) {
         azimuths[id] = azimuth
         updatePositions()

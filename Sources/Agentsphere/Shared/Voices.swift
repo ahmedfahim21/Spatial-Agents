@@ -23,6 +23,8 @@ struct VoiceError: LocalizedError {
 /// Tries each engine in order and falls back only if the previous one produced no audio,
 /// so a line is never spoken twice.
 final class VoiceRouter {
+    /// Tried before everything else when set (the iPhone app's server-side voice).
+    var primary: VoiceEngine?
     let elevenLabs = ElevenLabsVoice()
     let kokoro: VoiceEngine? = makeKokoroVoice()
     let apple = AppleVoice()
@@ -31,7 +33,7 @@ final class VoiceRouter {
     var onStatus: ((String) -> Void)?
 
     private var engines: [VoiceEngine] {
-        [elevenLabs, kokoro, apple].compactMap { $0 }.filter { $0.isAvailable }
+        [primary, elevenLabs, kokoro, apple].compactMap { $0 }.filter { $0.isAvailable }
     }
 
     /// Short lines ("Approved.") are cached per voice so they play instantly next time.
@@ -142,26 +144,11 @@ final class ElevenLabsVoice: VoiceEngine {
         for try await b in bytes {
             pending.append(b)
             if pending.count >= chunkBytes {
-                if let buf = makeBuffer(pending) { onChunk(buf) }
+                if let buf = PCM16.buffer(pending, format: format) { onChunk(buf) }
                 pending.removeAll(keepingCapacity: true)
             }
         }
-        if pending.count >= 2, let buf = makeBuffer(pending) { onChunk(buf) }
-    }
-
-    /// Int16 little-endian → Float32 buffer.
-    private func makeBuffer(_ data: Data) -> AVAudioPCMBuffer? {
-        let frames = data.count / 2
-        guard frames > 0, let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)),
-              let out = buf.floatChannelData?[0] else { return nil }
-        buf.frameLength = AVAudioFrameCount(frames)
-        data.withUnsafeBytes { raw in
-            for i in 0..<frames {
-                let v = Int16(littleEndian: raw.loadUnaligned(fromByteOffset: i * 2, as: Int16.self))
-                out[i] = Float(v) / 32768
-            }
-        }
-        return buf
+        if pending.count >= 2, let buf = PCM16.buffer(pending, format: format) { onChunk(buf) }
     }
 
     /// Picks a distinct voice per agent from the account's voices (premade first, stable order).
@@ -197,6 +184,39 @@ final class ElevenLabsVoice: VoiceEngine {
         case 402, 429: return "ElevenLabs quota or rate limit hit" + (detail.map { " (\($0))" } ?? "")
         default: return "ElevenLabs error \(status)" + (detail.map { ": \($0)" } ?? "")
         }
+    }
+}
+
+/// Raw 16-bit little-endian PCM (what ElevenLabs streams) → Float32 buffers.
+enum PCM16 {
+    static func buffer(_ data: Data, format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        let frames = data.count / 2
+        guard frames > 0, let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)),
+              let out = buf.floatChannelData?[0] else { return nil }
+        buf.frameLength = AVAudioFrameCount(frames)
+        data.withUnsafeBytes { raw in
+            for i in 0..<frames {
+                let v = Int16(littleEndian: raw.loadUnaligned(fromByteOffset: i * 2, as: Int16.self))
+                out[i] = Float(v) / 32768
+            }
+        }
+        return buf
+    }
+
+    /// Streams `bytes` as ~100 ms buffers so playback starts almost immediately.
+    static func stream(_ bytes: URLSession.AsyncBytes, sampleRate: Double, onChunk: (AVAudioPCMBuffer) -> Void) async throws {
+        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false)!
+        let chunkBytes = Int(sampleRate * 0.1) * 2
+        var pending = Data()
+        pending.reserveCapacity(chunkBytes)
+        for try await b in bytes {
+            pending.append(b)
+            if pending.count >= chunkBytes {
+                if let buf = buffer(pending, format: format) { onChunk(buf) }
+                pending.removeAll(keepingCapacity: true)
+            }
+        }
+        if pending.count >= 2, let buf = buffer(pending, format: format) { onChunk(buf) }
     }
 }
 

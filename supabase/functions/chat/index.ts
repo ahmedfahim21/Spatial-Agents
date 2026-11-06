@@ -40,6 +40,8 @@ Deno.serve(async (req) => {
     .filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
     .slice(-MAX_TURNS)
     .map((m) => ({ role: m.role, content: m.content.slice(0, MAX_CHARS) }));
+  // The greeting lives in the system prompt; the conversation itself must open with the user.
+  while (turns.length > 0 && turns[0].role === "assistant") turns.shift();
   if (turns.length === 0 || turns[turns.length - 1].role !== "user") {
     return json({ error: "The last message must be from the user" }, 400);
   }

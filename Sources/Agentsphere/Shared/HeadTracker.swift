@@ -21,6 +21,8 @@ final class HeadTracker {
     var onYaw: ((Double) -> Void)?
     /// Called on the main queue with smoothed pitch in degrees: positive = looking up.
     var onPitch: ((Double) -> Void)?
+    /// Smoothed yaw in the tracker's fixed frame (no body-follow), for world-anchored things.
+    var onFixedYaw: ((Double) -> Void)?
     var onGesture: ((HeadGesture) -> Void)?
     var onStatus: ((String) -> Void)?
     /// "walking", "re-centering" or "" — for the UI.
@@ -84,6 +86,7 @@ final class HeadTracker {
                 self.lastFollowState = self.follower.state
                 self.onFollowState?(self.follower.state)
             }
+            self.onFixedYaw?(normalizeAngle(smoothYaw))
             self.onYaw?(relative)
             self.onPitch?(smoothPitch)
         }
