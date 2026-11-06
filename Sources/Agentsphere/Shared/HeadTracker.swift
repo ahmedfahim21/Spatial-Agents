@@ -45,7 +45,19 @@ final class HeadTracker {
     /// How fast the head is turning right now, degrees per second.
     var yawSpeed: Double { gestures.yawSpeed }
 
+    /// Motion permission for headphone tracking.
+    static var authorization: String {
+        switch CMHeadphoneMotionManager.authorizationStatus() {
+        case .authorized: return "authorized"
+        case .denied: return "denied"
+        case .restricted: return "restricted"
+        case .notDetermined: return "not asked yet"
+        @unknown default: return "unknown"
+        }
+    }
+
     func start() {
+        print("Agentsphere: head tracking start (available: \(manager.isDeviceMotionAvailable), permission: \(Self.authorization))")
         guard manager.isDeviceMotionAvailable else {
             onStatus?("Head tracking unavailable. Connect AirPods Pro, Max, 3 or 4.")
             return
@@ -53,6 +65,7 @@ final class HeadTracker {
         manager.startDeviceMotionUpdates(to: .main) { [weak self] motion, error in
             guard let self else { return }
             if let error {
+                print("Agentsphere: head motion error: \(error)")
                 self.onStatus?("Motion error: \(error.localizedDescription)")
                 return
             }

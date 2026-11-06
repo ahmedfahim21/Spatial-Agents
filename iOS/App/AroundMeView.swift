@@ -61,7 +61,8 @@ struct AroundMeView: View {
         }
     }
 
-    /// Top-down view: you in the middle, facing up; agents placed where you hear them.
+    /// Top-down view in your body's frame: agents stay put around you and the cone shows
+    /// where your head is pointing, so turning your head visibly sweeps the cone.
     private var radar: some View {
         GeometryReader { geo in
             let size = min(geo.size.width, geo.size.height)
@@ -75,11 +76,16 @@ struct AroundMeView: View {
                              startAngle: .degrees(-90 - 22), endAngle: .degrees(-90 + 22), clockwise: false)
                     p.closeSubpath()
                 }
-                .fill(RadialGradient(colors: [Color.cyan.opacity(0.35), .clear], center: .center, startRadius: 0, endRadius: r * 1.15))
+                .fill(RadialGradient(colors: [Color.cyan.opacity(state.hasHeadData ? 0.4 : 0.12), .clear], center: .center, startRadius: 0, endRadius: r * 1.15))
                 .frame(width: size, height: size)
+                .rotationEffect(.degrees(head.yaw))
+                .animation(.linear(duration: 0.08), value: head.yaw)
                 Image(systemName: "person.fill").font(.title).foregroundStyle(.white.opacity(0.8))
+                Text(state.hasHeadData ? String(format: "%.0f°", head.yaw) : "No head tracking")
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    .offset(y: r * 1.25)
                 ForEach(state.talkable) { a in
-                    if let rel = state.relativeAngle(a.id) {
+                    if let rel = state.relativeAngle(a.id).map({ $0 + head.yaw }) {
                         AgentOrb(agent: a, size: 52,
                                  stare: state.focusedId == a.id ? state.stareProgress : 0,
                                  active: state.activeId == a.id, focused: state.focusedId == a.id)

@@ -57,6 +57,7 @@ final class MobileState: ObservableObject {
     /// Compass heading of the tracker's fixed-frame zero; nil until calibrated.
     private var worldOffset: Double?
     private var lastHeadAt = Date.distantPast
+    private var lastYawLog = Date.distantPast
 
     /// Where your head points in the world, degrees from true north.
     var headWorld: Double? {
@@ -87,13 +88,23 @@ final class MobileState: ObservableObject {
         voices.primary = ServerVoice()
         voices.onStatus = { [weak self] s in self?.voiceStatus = s }
 
-        tracker.onStatus = { [weak self] s in self?.trackingStatus = s }
+        tracker.onStatus = { [weak self] s in
+            print("Agentsphere: tracking status: \(s)")
+            self?.trackingStatus = s
+        }
         tracker.onYaw = { [weak self] y in
             guard let self else { return }
             self.yawBody = y
             self.head.yaw = y
             self.lastHeadAt = Date()
-            if !self.hasHeadData { self.hasHeadData = true }
+            if !self.hasHeadData {
+                self.hasHeadData = true
+                print("Agentsphere: head motion flowing")
+            }
+            if Date().timeIntervalSince(self.lastYawLog) > 2 {
+                self.lastYawLog = Date()
+                print(String(format: "Agentsphere: head yaw %.0f° (fixed %.0f°) pitch %.0f°", y, self.yawFixed, self.head.pitch))
+            }
             self.updateScene()
         }
         tracker.onFixedYaw = { [weak self] y in self?.yawFixed = y }
