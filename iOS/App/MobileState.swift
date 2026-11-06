@@ -32,6 +32,8 @@ final class MobileState {
     var withMe = true { didSet { syncPlacement() } }
     var findTargetId: UUID? { didSet { if oldValue != findTargetId { findTargetChanged() } } }
     private(set) var arrived: Set<UUID> = []
+    /// Shops' menus, fetched when you arrive at one (shown over it on the map).
+    private(set) var menus: [UUID: [CatalogItem]] = [:]
 
     private(set) var focusedId: UUID?
     /// Head direction: yaw relative to your body (+ = right) and raw pitch, degrees.
@@ -399,6 +401,7 @@ final class MobileState {
 
     private func didArrive(at a: Agent) {
         haptics.arrived()
+        if a.pricing == "paid" { Task { await loadMenu(a.id) } }
         if findTargetId == a.id { haptics.distance = nil }
         ensurePlaced(a)
         audio.setGain(id: a.id, gain: 1)
@@ -792,6 +795,12 @@ final class MobileState {
         return outcome
     }
 
+    /// Fetches a shop's menu (fresh on every arrival, so price changes show up).
+    func loadMenu(_ id: UUID) async {
+        guard Config.isConfigured, !offline else { return }
+        if let items = try? await backend.catalog(agentId: id) { menus[id] = items }
+    }
+
     /// Turns one of your public agents into a shop with this menu.
     func openShop(_ a: Agent, items: [CatalogItem]) async throws {
         _ = try await backend.saveCatalog(agentId: a.id, items: items)
@@ -1040,7 +1049,7 @@ extension MobileState {
             agent("Museum Guide · Hall B", .violet, .squircle, metres: 62, bearing: 45),
             agent("Where I parked", .orange, .hexagon, metres: 200, bearing: 300, mine: true, isPublic: false),
             agent("Sponsor Booth 4", .pink, .drop, metres: 280, bearing: 120),
-            agent("Corner Café Barista", .green, .capsule, metres: 1200, bearing: 250, pricing: "paid", mine: true),
+            agent("Corner Café Barista", .green, .capsule, metres: 16, bearing: 250, pricing: "paid", mine: true),
         ]
         myAgents = [
             agent("Daily Planner", .blue, .hexagon, greeting: "Morning. Want the plan for today?"),
@@ -1048,6 +1057,15 @@ extension MobileState {
             agent("Pitch Coach", .green, .drop, greeting: "Run me through your demo."),
         ]
         myAgents += nearby.filter { $0.isMine == true }
+        for shop in nearby where shop.pricing == "paid" {
+            menus[shop.id] = [
+                CatalogItem(id: UUID(), name: "Cappuccino", priceUsdc: 2),
+                CatalogItem(id: UUID(), name: "Masala chai", priceUsdc: 1.5),
+                CatalogItem(id: UUID(), name: "Croissant", priceUsdc: 3),
+                CatalogItem(id: UUID(), name: "Big breakfast", priceUsdc: 8),
+                CatalogItem(id: UUID(), name: "Cold brew", priceUsdc: 3.5),
+            ]
+        }
         location.simulated = here
         syncPlacement()
         updateArrivals()

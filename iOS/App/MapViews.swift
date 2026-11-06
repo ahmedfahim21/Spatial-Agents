@@ -42,6 +42,16 @@ struct ExploreMap: View {
                 }
                 .annotationTitles(.hidden)
                 .tag(a.id)
+                // Arrived at a shop: its menu pops up above it.
+                if state.arrived.contains(a.id), let menu = state.menus[a.id], !menu.isEmpty {
+                    let size = MapBot.size(distance: state.distance(to: a), selected: selected == a.id)
+                    Annotation("", coordinate: a.coordinate!, anchor: .bottom) {
+                        MenuBubble(items: menu, lift: size / 2 + (selected == a.id ? 34 : 8))
+                            .equatable()
+                            .onTapGesture { selected = a.id }
+                    }
+                    .annotationTitles(.hidden)
+                }
             }
         }
         .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll))
@@ -69,6 +79,59 @@ struct ExploreMap: View {
         switch mood {
         case .error, .ended, .far: mood
         default: .idle
+        }
+    }
+}
+
+/// A shop's menu, floating above it on the map once you're within its reach.
+private struct MenuBubble: View, Equatable {
+    let items: [CatalogItem]
+    /// How far above the agent's centre to sit (clear of its body and name).
+    let lift: CGFloat
+    private let shown = 4
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 5) {
+                    Image(systemName: "bag.fill").font(.caption2)
+                    Text("Menu").font(.caption.weight(.bold))
+                }
+                .foregroundStyle(.secondary)
+                ForEach(items.prefix(shown), id: \.key) { item in
+                    HStack(spacing: 12) {
+                        Text(item.name).lineLimit(1)
+                        Spacer(minLength: 0)
+                        Text(Money.usd(item.priceUsdc)).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    .font(.footnote.weight(.medium))
+                }
+                if items.count > shown {
+                    Text("+\(items.count - shown) more").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(width: 180, alignment: .leading)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .shadow(color: .black.opacity(0.14), radius: 8, y: 3)
+            // The little point down at the agent.
+            Pointer()
+                .fill(Color(.secondarySystemGroupedBackground))
+                .frame(width: 16, height: 8)
+        }
+        .padding(.bottom, lift)
+        .transition(.scale(scale: 0.85, anchor: .bottom).combined(with: .opacity))
+    }
+
+    private struct Pointer: Shape {
+        func path(in rect: CGRect) -> Path {
+            var p = Path()
+            p.move(to: CGPoint(x: rect.minX, y: rect.minY))
+            p.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+            p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+            p.closeSubpath()
+            return p
         }
     }
 }
