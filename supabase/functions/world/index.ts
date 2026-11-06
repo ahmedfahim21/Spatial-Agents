@@ -22,7 +22,7 @@ const ACCEPTED = [
 const ATTEMPT_TTL_MS = 10 * 60 * 1000;
 const CLOCK_SKEW_S = 30;
 
-type Discovery = { authorization_endpoint: string; token_endpoint: string; jwks_uri: string };
+type Discovery = { authorization_endpoint: string; token_endpoint: string; jwks_uri: string; acr_values_supported?: string[] };
 let discovery: Discovery | null = null;
 let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 
@@ -33,6 +33,13 @@ async function idp(): Promise<Discovery> {
   discovery = await r.json();
   jwks = createRemoteJWKSet(new URL(discovery!.jwks_uri));
   return discovery!;
+}
+
+/** The verified-human levels this issuer offers (the sandbox has Orb only). */
+async function acceptedHere(): Promise<string[]> {
+  const offered = (await idp()).acr_values_supported;
+  const both = offered ? ACCEPTED.filter((a) => offered.includes(a)) : ACCEPTED;
+  return both.length ? both : ACCEPTED;
 }
 
 const b64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -87,7 +94,7 @@ async function start(req: Request): Promise<Response> {
     state, nonce, code_challenge: challenge, code_challenge_method: "S256",
     // Always a fresh check: a checkpoint must not ride on an old session.
     max_age: "0",
-    claims: JSON.stringify({ id_token: { acr: { essential: true, values: ACCEPTED } } }),
+    claims: JSON.stringify({ id_token: { acr: { essential: true, values: await acceptedHere() } } }),
   });
   return json({ url: `${authorization_endpoint}?${params}`, callback_scheme: "agentsphere" });
 }
