@@ -52,6 +52,7 @@ function Nav() {
           Air Agents
         </a>
         <div className="flex items-center gap-6 text-[13px] text-ink/70">
+          <a href="#demo" className="hidden transition-colors hover:text-ink sm:block">Demo</a>
           <a href="#airpods" className="hidden transition-colors hover:text-ink sm:block">AirPods</a>
           <a href="#gestures" className="hidden transition-colors hover:text-ink sm:block">Gestures</a>
           <a href="#iphone" className="hidden transition-colors hover:text-ink sm:block">iPhone</a>
@@ -90,6 +91,24 @@ function Hero() {
         </div>
       </Reveal>
     </section>
+  );
+}
+
+function Demo() {
+  return (
+    <Section id="demo" compact tone="white" label="Demo" title="See it in action." intro="Two personal agents, a coffee paid for out loud, and how it all fits together.">
+      <div className="mx-auto aspect-video max-w-4xl overflow-hidden rounded-[28px] bg-[var(--tile)]">
+        <iframe
+          className="size-full"
+          src="https://www.youtube-nocookie.com/embed/QWUU-ps2pFI?rel=0"
+          title="Air Agents demo"
+          loading="lazy"
+          allow="autoplay; encrypted-media; picture-in-picture"
+          allowFullScreen
+          referrerPolicy="strict-origin-when-cross-origin"
+        />
+      </div>
+    </Section>
   );
 }
 
@@ -193,6 +212,7 @@ export function App() {
       <Nav />
       <main>
         <Hero />
+        <Demo />
         <Section
           id="airpods"
           tone="grey"
